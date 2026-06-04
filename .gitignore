@@ -1,0 +1,16 @@
+# Never commit API keys or secrets
+.env
+.env.local
+.env*.local
+*.key
+
+# Vercel
+.vercel
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

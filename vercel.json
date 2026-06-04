@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/messages.js": {
+      "maxDuration": 60
+    }
+  }
+}

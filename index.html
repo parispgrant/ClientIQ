@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClientIQ — AI-Powered Client Onboarding Intelligence</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin:0; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#F8FAFC; color:#09090B; -webkit-font-smoothing:antialiased; }
+    .grid-bg { background-image: linear-gradient(rgba(255,255,255,0.04) 1px,transparent 1px), linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px); background-size:40px 40px; }
+    @keyframes fadeUp   { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes spin     { to { transform:rotate(360deg); } }
+    @keyframes blink    { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    @keyframes slideIn  { from { opacity:0; transform:translateY(-8px) translateX(-50%); } to { opacity:1; transform:translateY(0) translateX(-50%); } }
+    @keyframes drawerIn { from { transform:translateX(-100%); } to { transform:translateX(0); } }
+    .fade-up    { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+    .spinning   { animation: spin 0.85s linear infinite; }
+    .gauge-arc  { transition: stroke-dashoffset 1.5s cubic-bezier(0.4,0,0.2,1); }
+    .bar-fill   { transition: width 1.1s cubic-bezier(0.4,0,0.2,1); }
+    .drawer     { animation: drawerIn 0.25s cubic-bezier(0.16,1,0.3,1); }
+    input, textarea, select { font-family:inherit; }
+    input:focus, textarea:focus, select:focus { outline:none; }
+    select { appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%2371717A' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; padding-right:28px !important; cursor:pointer; }
+    ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:2px; }
+
+    /* ── Print ─────────────────────────────────────────────────────────────── */
+    .print-only { display:none !important; }
+    @media print {
+      * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+      @page { margin:1.4cm; size:A4; }
+      body { background:white !important; font-size:9.5pt; }
+      .no-print  { display:none !important; }
+      .print-only { display:block !important; }
+      .page-wrap  { padding:0 !important; max-width:100% !important; }
+      .fade-up    { animation:none !important; opacity:1 !important; transform:none !important; }
+      .print-break { page-break-before:always; }
+      .no-break   { page-break-inside:avoid; }
+      header { background:white !important; border-bottom:2px solid #09090B !important; }
+      header .grid-bg, header div[style*="radial-gradient"] { display:none !important; }
+      .print-header-logo { color:#09090B !important; }
+    }
+
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    @media (max-width:768px) { .two-col { grid-template-columns:1fr !important; } .three-col { grid-template-columns:1fr 1fr !important; } .top-row { grid-template-columns:1fr !important; } }
+    @media (max-width:520px) { .three-col { grid-template-columns:1fr !important; } }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ─── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  ink:'#09090B', ink9:'#18181B', ink8:'#27272A', ink7:'#3F3F46', ink6:'#52525B',
+  ink5:'#71717A', ink4:'#A1A1AA', ink3:'#D4D4D8', ink2:'#E4E4E7', ink1:'#F4F4F5',
+  ghost:'#FAFAFA', white:'#FFFFFF',
+  green:'#10B981', greenBg:'#ECFDF5', greenBorder:'#6EE7B7',
+  amber:'#F59E0B', amberBg:'#FFFBEB', amberBorder:'#FCD34D',
+  red:'#F43F5E',  redBg:'#FFF1F2',  redBorder:'#FECDD3',
+  purple:'#8B5CF6', purpleBg:'#F5F3FF', purpleBorder:'#C4B5FD',
+  blue:'#3B82F6', blueBg:'#EFF6FF', blueBorder:'#BFDBFE',
+  indigo:'#18181B', indigoDark:'#09090B', indigoLight:'#F4F4F5',
+  slate:'#09090B', slate6:'#52525B', slate4:'#A1A1AA', slate2:'#E4E4E7', slate1:'#F4F4F5',
+  card:'#FAFAFA', pink:'#BE185D',
+};
+
+// ─── Business constants — NOT CHANGED ─────────────────────────────────────────
+const RISK = {
+  Low:      { color:C.green,  bg:C.greenBg,  label:'LOW RISK' },
+  Moderate: { color:C.amber,  bg:C.amberBg,  label:'MODERATE RISK' },
+  High:     { color:C.red,    bg:C.redBg,    label:'HIGH RISK' },
+  Elevated: { color:C.purple, bg:C.purpleBg, label:'ELEVATED RISK' },
+};
+
+const LOADING_STEPS = [
+  'Analyzing client profile…','Running KYC pattern analysis…',
+  'Assessing product fit…','Drafting relationship brief…','Finalizing intelligence report…',
+];
+
+const BANKING_NEEDS = ['Payments','Lending','Treasury','Investments','Crypto','Compliance'];
+
+const SAMPLES = {
+  crypto: {
+    clientName:'Nova Protocol Inc.', businessType:'C-Corporation', industry:'Financial Technology',
+    subIndustry:'Decentralized Finance (DeFi)', revenueRange:'$5M – $25M', employees:'25–100',
+    geography:'International', bankingNeeds:['Payments','Treasury','Crypto','Compliance'],
+    riskFactors:'Operates in Cayman Islands and Singapore. Token issuance activities. ~$40M crypto treasury in ETH/BTC. 300% YoY growth. Several pseudonymous founders listed on whitepaper.',
+    sourceOfFunds:'Series A VC ($22M lead Paradigm), protocol fee revenue, 2023 token sale proceeds.',
+    existingBanking:'Mercury (primary ops), Silvergate (closed), informal crypto OTC desks.',
+    rmNotes:'Referred by Paradigm Capital. CEO ex-Goldman, CFO technical. Shopping for a bank that understands crypto natively. Also speaking with JPM and SVB successor. Need to move fast.'
+  },
+  manufacturing: {
+    clientName:'Midwest Precision Parts Co.', businessType:'S-Corporation', industry:'Manufacturing',
+    subIndustry:'Precision Industrial Components', revenueRange:'$25M – $100M', employees:'250–500',
+    geography:'Domestic', bankingNeeds:['Payments','Lending','Treasury'],
+    riskFactors:'Ford represents 38% of revenue (customer concentration). Seasonal cash flow variance. Pension obligations. Aging equipment capex needs.',
+    sourceOfFunds:'Operating revenue since 1987. Family-owned, 2nd generation. No external investors.',
+    existingBanking:'PNC Bank ($15M credit facility, relationship deteriorating post-restructuring), local community bank.',
+    rmNotes:'Referred by M&A attorney. Owners exploring ESOP transition in 3–5 years. Need better treasury management and potential acquisition financing. Relationship-driven — meet in person only.'
+  },
+  hnw: {
+    clientName:'Alexandra Chen', businessType:'Individual / Private Client', industry:'Private Wealth',
+    subIndustry:'Technology Executive & Angel Investor', revenueRange:'$1M+', employees:'N/A',
+    geography:'Both', bankingNeeds:['Investments','Treasury','Payments'],
+    riskFactors:'Dual US/Taiwan citizenship. Multiple international accounts. Large pre-IPO equity positions. Significant incoming wires expected from equity liquidity event.',
+    sourceOfFunds:'Executive comp (VP Eng Stripe 2018–2024), RSU proceeds (~$8M), angel returns, SF and Singapore real estate.',
+    existingBanking:'Chase Private Client, Schwab brokerage, HSBC Premier Singapore. Looking to consolidate.',
+    rmNotes:'Net worth $12–18M. Referred by existing client. Digital-first. Considering family office structure. Husband is also a tech executive — potential second onboarding.'
+  }
+};
+
+const INIT_FORM = {
+  clientName:'', businessType:'', industry:'', subIndustry:'',
+  revenueRange:'', employees:'', geography:'', bankingNeeds:[],
+  riskFactors:'', sourceOfFunds:'', existingBanking:'', rmNotes:''
+};
+
+// ─── New: Regulatory Frameworks ───────────────────────────────────────────────
+const FRAMEWORKS = {
+  US:    { label:'US — FinCEN / BSA', short:'US (FinCEN)', context:'Apply US regulatory framework: FinCEN BSA/AML requirements, CDD Rule (31 CFR § 1020.220), OFAC sanctions screening, SAR filing under 31 USC 5318(g), PATRIOT Act Sec. 326 CIP, FinCEN beneficial ownership rule.' },
+  EU:    { label:'EU — AMLD6 / EBA',  short:'EU (AMLD6)',  context:'Apply EU regulatory framework: 6AMLD, EBA AML guidelines, GDPR considerations, beneficial ownership registers (EU 2018/843), PEP screening, FATF recommendations as transposed into EU law.' },
+  UK:    { label:'UK — FCA / MLR 2017', short:'UK (FCA)', context:'Apply UK regulatory framework: FCA Money Laundering Regulations 2017, Proceeds of Crime Act 2002, JMLSG guidance, UK financial sanctions by OFSI, Companies House PSC register requirements.' },
+  SG:    { label:'Singapore — MAS', short:'MAS (SG)',     context:'Apply Singapore regulatory framework: MAS Notice 626 (AML/CFT), MAS Guidelines on individual accountability, Suspicious Transaction Reporting Office (STRO), CDSA, and cross-border wire transfer requirements.' },
+  MULTI: { label:'Multi-Jurisdiction', short:'Multi-JX',  context:'Apply multi-jurisdictional framework: FATF 40 Recommendations, Wolfsberg Group principles, Basel Committee AML guidelines, cross-border MLAT considerations, and applicable jurisdiction-specific rules for the client profile.' },
+};
+
+// ─── New: Risk Threshold Bands ────────────────────────────────────────────────
+const THRESHOLDS = [
+  { min:0,  max:30,  label:'Standard CDD',       action:'Standard onboarding',        color:C.green },
+  { min:31, max:60,  label:'EDD Required',        action:'Enhanced Due Diligence',     color:C.amber },
+  { min:61, max:80,  label:'Senior Approval',     action:'Senior sign-off required',   color:C.red   },
+  { min:81, max:100, label:'Committee Review',    action:'Credit committee + SAR risk',color:C.purple},
+];
+const getThreshold = s => THRESHOLDS.find(t => s >= t.min && s <= t.max) || THRESHOLDS[0];
+
+// ─── New: Section regeneration configs ────────────────────────────────────────
+const REGEN = {
+  kycFlags:               { label:'KYC Flags',        isArray:true,  prompt:'Regenerate kycFlags: max 5 items as JSON array [{flag,priority:"High|Medium|Low",confidence:"High|Medium|Low",citation:"regulatory ref or empty string",action:"1 sentence"}]. Return ONLY the JSON array.' },
+  documentChecklist:      { label:'Document Checklist',isArray:true,  prompt:'Regenerate documentChecklist: max 8 items as JSON array [{document,required:bool,reason:"1 sentence"}]. Return ONLY the JSON array.' },
+  productFit:             { label:'Product Fit',       isArray:true,  prompt:'Regenerate productFit: max 5 items as JSON array [{product,fitScore:0-100,reasoning:"1 sentence"}]. Return ONLY the JSON array.' },
+  relationshipManagerBrief:{ label:'RM Brief',         isArray:false, prompt:'Regenerate relationshipManagerBrief as a 3-sentence string an RM reads before a client call. Return ONLY the plain text string — no JSON, no quotes.' },
+  competitiveIntel:       { label:'Competitive Intel', isArray:true,  prompt:'Regenerate competitiveIntel: max 3 items as JSON array [{competitor,positioning:"1 sentence on how to win vs this competitor"}]. Return ONLY the JSON array.' },
+  keyQuestions:           { label:'Key Questions',     isArray:true,  prompt:'Regenerate keyQuestions as JSON array of exactly 5 concise question strings. Return ONLY the JSON array.' },
+};
+
+// ─── History helpers ───────────────────────────────────────────────────────────
+const HIST_KEY     = 'clientiq_v2_history';
+const ANALYST_KEY  = 'clientiq_analyst';
+const FRAMEWORK_KEY= 'clientiq_framework';
+const MAX_HIST     = 20;
+const loadHist     = () => { try { return JSON.parse(localStorage.getItem(HIST_KEY)||'[]'); } catch { return []; } };
+
+// ─── System prompt builder ─────────────────────────────────────────────────────
+const buildSystemPrompt = fw => `You are a senior financial services compliance AI. ${FRAMEWORKS[fw]?.context || FRAMEWORKS.US.context}
+
+Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. Strings 1-2 sentences max, arrays within limits shown. Total under 2500 tokens.
+
+{"clientSnapshot":"2 sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 sentences on top 3 risk drivers","kycFlags":[max 5: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"1 sentence"}],"documentChecklist":[max 8: {"document":"name","required":bool,"reason":"1 sentence"}],"productFit":[max 5: {"product":"name","fitScore":0-100,"reasoning":"1 sentence"}],"relationshipManagerBrief":"3 sentences","onboardingTimeline":[max 5: {"phase":"name","days":number,"description":"1 sentence"}],"keyQuestions":["q1","q2","q3","q4","q5"],"redFlags":["1 sentence each, max 3, empty array if none"],"competitiveIntel":[max 3: {"competitor":"name","positioning":"1 sentence"}]}`;
+
+// ─── Static class maps ─────────────────────────────────────────────────────────
+const PRI_BADGE = {
+  High:     'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-rose-500/10 text-rose-600 border border-rose-500/20',
+  Medium:   'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-amber-400/10 text-amber-600 border border-amber-400/20',
+  Low:      'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+  Critical: 'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-purple-500/10 text-purple-700 border border-purple-500/20',
+};
+const CONF_BADGE = {
+  High:   'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200',
+  Medium: 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200',
+  Low:    'text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200',
+};
+
+// ─── Primitive components ──────────────────────────────────────────────────────
+function Label({ children, sub }) {
+  return (
+    <label className="block mb-1.5">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">{children}</span>
+      {sub && <span className="text-[10px] text-zinc-300 font-normal ml-1.5 normal-case tracking-normal">{sub}</span>}
+    </label>
+  );
+}
+function SectionRule({ label }) {
+  return (
+    <div className="flex items-center gap-3 mb-4 pb-2.5 border-b border-zinc-900/[0.06]">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 whitespace-nowrap">{label}</span>
+      <div className="flex-1"/>
+    </div>
+  );
+}
+function Input({ label, sub, value, onChange, placeholder, mono }) {
+  return (
+    <div>
+      {label && <Label sub={sub}>{label}</Label>}
+      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+        className="w-full px-3 py-2 rounded-lg border border-zinc-900/[0.09] bg-white text-[13px] text-zinc-900 placeholder:text-zinc-400 transition-all duration-200 ease-out focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
+        style={{fontFamily:mono?'ui-monospace,SFMono-Regular,monospace':'inherit'}}/>
+    </div>
+  );
+}
+function Textarea({ label, value, onChange, placeholder, rows=3 }) {
+  return (
+    <div>
+      {label && <Label>{label}</Label>}
+      <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        className="w-full px-3 py-2 rounded-lg border border-zinc-900/[0.09] bg-white text-[13px] text-zinc-900 placeholder:text-zinc-400 resize-y leading-relaxed transition-all duration-200 ease-out focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"/>
+    </div>
+  );
+}
+function Select({ label, value, onChange, options, placeholder }) {
+  return (
+    <div>
+      {label && <Label>{label}</Label>}
+      <select value={value} onChange={e=>onChange(e.target.value)}
+        className="w-full px-3 py-2 rounded-lg border border-zinc-900/[0.09] bg-white text-[13px] transition-all duration-200 ease-out focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
+        style={{color:value?C.ink:C.ink4}}>
+        <option value="">{placeholder}</option>
+        {options.map(o=><option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+function Chip({ label, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      className={active
+        ? 'px-3 py-1.5 rounded-md text-[12px] font-medium border cursor-pointer transition-all duration-200 ease-out bg-zinc-900 border-zinc-900 text-white active:scale-95'
+        : 'px-3 py-1.5 rounded-md text-[12px] font-medium border cursor-pointer transition-all duration-200 ease-out bg-white border-zinc-200 text-zinc-600 hover:border-blue-400/50 hover:bg-blue-50/50 hover:text-blue-700 active:scale-95'}>
+      {label}
+    </button>
+  );
+}
+function Btn({ children, onClick, disabled, variant='primary', small }) {
+  if (variant==='ghost') return (
+    <button onClick={onClick} disabled={disabled}
+      className={small
+        ? 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 text-zinc-600 text-[12px] font-medium transition-all duration-200 ease-out hover:border-blue-400/40 hover:bg-blue-50/60 hover:text-blue-700 active:scale-95 cursor-pointer disabled:opacity-40'
+        : 'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-zinc-200 text-zinc-600 text-[13px] font-medium transition-all duration-200 ease-out hover:border-blue-400/40 hover:bg-blue-50/60 hover:text-blue-700 active:scale-95 cursor-pointer disabled:opacity-40'}>
+      {children}
+    </button>
+  );
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={small
+        ? 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[12px] font-medium transition-all duration-200 ease-out hover:bg-zinc-800 hover:-translate-y-px active:scale-95 cursor-pointer disabled:bg-zinc-300 disabled:cursor-not-allowed shadow-sm'
+        : 'inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-zinc-900 text-white text-[13px] font-medium transition-all duration-200 ease-out hover:bg-zinc-800 hover:-translate-y-px active:scale-95 cursor-pointer disabled:bg-zinc-300 disabled:cursor-not-allowed shadow-sm'}>
+      {children}
+    </button>
+  );
+}
+function Tooltip({ text, children }) {
+  const [on, setOn] = useState(false);
+  return (
+    <div className="relative inline-block" onMouseEnter={()=>setOn(true)} onMouseLeave={()=>setOn(false)}>
+      {children}
+      {on && (
+        <div className="absolute bottom-full left-1/2 mb-2.5 w-56 text-center z-50 pointer-events-none"
+          style={{transform:'translateX(-50%)',animation:'slideIn 0.15s ease-out'}}>
+          <div className="bg-zinc-950 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl tracking-wide">{text}</div>
+          <div className="w-0 h-0 mx-auto mt-px" style={{borderLeft:'5px solid transparent',borderRight:'5px solid transparent',borderTop:'5px solid #09090B'}}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── History Panel ─────────────────────────────────────────────────────────────
+function HistoryPanel({ history, onLoad, onDelete, onClose }) {
+  const fmt = d => new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-zinc-950/40 backdrop-blur-sm no-print" onClick={onClose}/>
+      <div className="fixed top-0 left-0 bottom-0 z-50 w-80 bg-white border-r border-zinc-200 flex flex-col shadow-2xl drawer no-print">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100">
+          <div>
+            <h3 className="font-semibold text-[14px] text-zinc-900 tracking-tight">Brief History</h3>
+            <p className="text-[11px] text-zinc-400 mt-0.5">{history.length} of {MAX_HIST} saved</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-all duration-150 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+        {history.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-center px-6">
+            <div>
+              <div className="text-2xl mb-2">📋</div>
+              <p className="text-[13px] text-zinc-400">No briefs yet. Generate your first analysis to see it here.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto py-2">
+            {history.map(h => {
+              const R = RISK[h.riskTier] || RISK.Moderate;
+              return (
+                <div key={h.id} className="mx-2 mb-1.5 p-3 rounded-lg border border-zinc-100 hover:border-blue-400/30 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer group"
+                  onClick={()=>onLoad(h)}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[13px] text-zinc-900 truncate">{h.clientName}</div>
+                      <div className="text-[10px] text-zinc-400 mt-0.5">{fmt(h.date)}</div>
+                      {h.analyst && <div className="text-[10px] text-zinc-400">by {h.analyst}</div>}
+                      {h.framework && <div className="text-[10px] text-blue-500 font-mono">{FRAMEWORKS[h.framework]?.short}</div>}
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <div className="text-right">
+                        <div className="font-mono font-bold text-[14px]" style={{color:R.color}}>{h.riskScore}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wide" style={{color:R.color}}>{h.riskTier}</div>
+                      </div>
+                      <button onClick={e=>onDelete(h.id,e)}
+                        className="w-5 h-5 rounded flex items-center justify-center text-zinc-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all duration-150 cursor-pointer">
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="px-5 py-3 border-t border-zinc-100">
+          <button onClick={()=>{ if(window.confirm('Clear all history?')){onDelete('__all__',{stopPropagation:()=>{}});} }}
+            className="text-[11px] text-zinc-400 hover:text-rose-500 transition-colors duration-150 cursor-pointer">
+            Clear all history
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Threshold Legend ──────────────────────────────────────────────────────────
+function ThresholdLegend({ score }) {
+  const current = getThreshold(score);
+  return (
+    <div className="mt-4 pt-4 border-t border-zinc-100 no-break">
+      <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-2.5">Threshold Guide</div>
+      <div className="space-y-1.5">
+        {THRESHOLDS.map(t => {
+          const active = score >= t.min && score <= t.max;
+          return (
+            <div key={t.label} className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-all duration-200 ${active?'bg-zinc-50 ring-1 ring-zinc-200':''}`}>
+              <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{background:t.color, opacity:active?1:0.35}}/>
+              <div className="flex-1">
+                <span className="text-[11px] font-medium text-zinc-700">{t.label}</span>
+                <span className="text-[10px] text-zinc-400 ml-2">{t.min}–{t.max}</span>
+              </div>
+              {active && <div className="text-[10px] font-semibold" style={{color:t.color}}>{t.action}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Print Header (only visible when printing) ────────────────────────────────
+function PrintHeader({ clientName, analyst, framework, date, riskScore, riskTier }) {
+  const R = RISK[riskTier] || RISK.Moderate;
+  return (
+    <div className="print-only mb-6 pb-4" style={{borderBottom:'2px solid #09090B'}}>
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <div className="font-bold text-[18px] tracking-tight print-header-logo">ClientIQ</div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest">Client Intelligence Brief</div>
+        </div>
+        <div className="text-right text-[10px] text-zinc-500 space-y-0.5">
+          {analyst && <div>Analyst: <strong>{analyst}</strong></div>}
+          <div>Framework: <strong>{FRAMEWORKS[framework]?.short || 'US (FinCEN)'}</strong></div>
+          <div>Model: <strong>claude-sonnet-4-5</strong></div>
+          <div>Generated: <strong>{new Date(date).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})}</strong></div>
+        </div>
+      </div>
+      <div className="flex items-baseline gap-4">
+        <h1 className="font-bold text-[22px] tracking-tight">{clientName}</h1>
+        <div className="font-mono font-bold text-[16px]" style={{color:R.color}}>
+          Risk Score: {riskScore} — {riskTier}
+        </div>
+      </div>
+      <div className="mt-2 text-[9px] text-zinc-400 leading-snug max-w-2xl">
+        DISCLAIMER: This brief is AI-generated and does not constitute a regulatory determination. Sanctions screening requires real-time database verification (OFAC, UN, EU lists). All findings must be reviewed by a qualified compliance officer before onboarding decisions are made. Client data was processed via Anthropic's API — ensure this is permissible under your data governance policy.
+      </div>
+    </div>
+  );
+}
+
+// ─── Report card ───────────────────────────────────────────────────────────────
+function Card({ title, icon, accent, delay, children, onRegenerate, regenerating }) {
+  return (
+    <div className="fade-up bg-white rounded-xl border border-zinc-900/[0.07] shadow-sm overflow-hidden no-break"
+      style={{animationDelay:`${delay||0}ms`, borderTop:`2px solid ${accent||C.blue}`}}>
+      <div className="px-5 pt-4 pb-3 bg-gradient-to-r from-white via-zinc-50/40 to-transparent border-b border-zinc-900/[0.04] flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+          <span className="text-sm leading-none">{icon}</span>{title}
+        </div>
+        {onRegenerate && (
+          <button onClick={onRegenerate} disabled={regenerating}
+            className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-blue-600 transition-colors duration-150 cursor-pointer disabled:opacity-50 no-print">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className={regenerating?'spinning':''}>
+              <path d="M10.5 6A4.5 4.5 0 1 1 6 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <path d="M10.5 1.5v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            {regenerating?'Updating…':'Regenerate'}
+          </button>
+        )}
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </div>
+  );
+}
+
+// ─── Risk Gauge ────────────────────────────────────────────────────────────────
+function RiskGauge({ score, tier }) {
+  const [val, setVal] = useState(0);
+  const R = RISK[tier] || RISK.Moderate;
+  const r = 78;
+  const total = (270/360)*2*Math.PI*r;
+  const offset = total - (val/100)*total;
+  useEffect(()=>{ const t=setTimeout(()=>setVal(score),150); return()=>clearTimeout(t); },[score]);
+  return (
+    <div className="flex flex-col items-center">
+      <div className="relative" style={{width:200,height:172}}>
+        <svg viewBox="0 0 200 200" width="200" height="200" className="absolute top-0 left-0">
+          <path d="M 44.8 155.2 A 78 78 0 1 1 155.2 155.2" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="12" strokeLinecap="round"/>
+          <path d="M 44.8 155.2 A 78 78 0 1 1 155.2 155.2" fill="none" stroke={R.color} strokeWidth="12" strokeLinecap="round"
+            strokeDasharray={total} strokeDashoffset={offset} className="gauge-arc"/>
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{paddingTop:16}}>
+          <div className="font-mono font-bold leading-none tracking-tighter" style={{fontSize:46,color:R.color,fontVariantNumeric:'tabular-nums'}}>{score}</div>
+          <div className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 mt-1">Risk Score</div>
+        </div>
+      </div>
+      <div className="font-bold text-[10px] tracking-wide px-3 py-1 rounded-md -mt-2" style={{background:R.bg,color:R.color}}>{R.label}</div>
+    </div>
+  );
+}
+
+// ─── KYC Flag (updated: confidence + citation) ────────────────────────────────
+function KYCFlag({ flag, priority, confidence, citation, action, last }) {
+  const badgeCls = PRI_BADGE[priority] || PRI_BADGE['Low'];
+  const confCls  = CONF_BADGE[confidence] || CONF_BADGE['Medium'];
+  return (
+    <div className={`flex gap-3 items-start py-2.5 px-2 -mx-2 rounded-lg transition-all duration-200 ease-out hover:bg-zinc-50 group ${last?'':'border-b border-zinc-900/[0.05]'}`}>
+      <div className="flex flex-col gap-1 flex-shrink-0 mt-0.5">
+        <span className={badgeCls} style={{whiteSpace:'nowrap'}}>{priority?.toUpperCase()}</span>
+        {confidence && <span className={confCls} title="AI confidence level">{confidence} conf.</span>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-[13px] text-zinc-900 tracking-tight mb-0.5">{flag}</div>
+        <div className="text-[12px] text-zinc-500 leading-snug">{action}</div>
+        {citation && (
+          <div className="mt-1 font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-block">{citation}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Document item ─────────────────────────────────────────────────────────────
+function DocItem({ document, required, reason, last }) {
+  return (
+    <div className={`flex items-start gap-2.5 py-2.5 px-2 -mx-2 rounded-lg transition-all duration-200 ease-out ${required?'hover:bg-emerald-50/50':'hover:bg-zinc-50'} ${last?'':'border-b border-zinc-900/[0.05]'}`}>
+      <div className={`w-4 h-4 rounded-[4px] flex items-center justify-center flex-shrink-0 mt-0.5 ${required?'bg-emerald-500/10 border border-emerald-500/40':'bg-transparent border border-zinc-200'}`}>
+        {required && <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke={C.green} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-[13px] text-zinc-900 tracking-tight">{document}</div>
+        <div className="text-[11px] text-zinc-400 mt-0.5 leading-snug">{reason}</div>
+      </div>
+      {!required && <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-300 mt-1 flex-shrink-0">Conditional</span>}
+    </div>
+  );
+}
+
+// ─── Product Fit Bar ───────────────────────────────────────────────────────────
+function FitBar({ product, fitScore, reasoning }) {
+  const [w, setW] = useState(0);
+  const col = fitScore>=75?C.green:fitScore>=50?C.blue:C.ink3;
+  useEffect(()=>{ const t=setTimeout(()=>setW(fitScore),400); return()=>clearTimeout(t); },[fitScore]);
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-baseline mb-1.5">
+        <span className="text-[13px] font-medium text-zinc-800 tracking-tight">{product}</span>
+        <span className="font-mono text-[12px] font-semibold tracking-tighter" style={{color:col}}>{fitScore}</span>
+      </div>
+      <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden mb-1.5">
+        <div className="h-full rounded-full bar-fill" style={{width:`${w}%`,background:col}}/>
+      </div>
+      <div className="text-[11px] text-zinc-400 leading-snug">{reasoning}</div>
+    </div>
+  );
+}
+
+// ─── Timeline Item ─────────────────────────────────────────────────────────────
+function TimelineItem({ phase, days, description, index, isLast }) {
+  return (
+    <div className="flex gap-3.5">
+      <div className="flex flex-col items-center">
+        <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center font-mono text-[10px] font-bold text-blue-600 flex-shrink-0">
+          {String(index+1).padStart(2,'0')}
+        </div>
+        {!isLast && <div className="w-px flex-1 bg-zinc-100 mt-1"/>}
+      </div>
+      <div className={`flex-1 ${isLast?'pb-0':'pb-4'}`} style={{paddingTop:3}}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[13px] font-medium text-zinc-900 tracking-tight">{phase}</span>
+          <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-500 border border-zinc-200 tracking-wide">{days}d</span>
+        </div>
+        <div className="text-[12px] text-zinc-500 leading-relaxed">{description}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Competitor Card ───────────────────────────────────────────────────────────
+function CompCard({ competitor, positioning }) {
+  const letter = (competitor||'?')[0].toUpperCase();
+  const bgs   = ['#E4E4E7','#FEE2E2','#FEF3C7','#D1FAE5','#DBEAFE','#EDE9FE'];
+  const texts = ['#3F3F46','#991B1B','#78350F','#065F46','#1D4ED8','#5B21B6'];
+  const idx   = (competitor||'').charCodeAt(0)%bgs.length;
+  return (
+    <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-900/[0.07] mb-2 transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md hover:border-blue-400/20 hover:bg-white cursor-default no-break">
+      <div className="flex items-center gap-2.5 mb-2">
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-[12px] flex-shrink-0" style={{background:bgs[idx],color:texts[idx]}}>{letter}</div>
+        <span className="font-medium text-[13px] text-zinc-900 tracking-tight">{competitor}</span>
+      </div>
+      <div className="text-[12px] text-zinc-500 leading-relaxed">{positioning}</div>
+    </div>
+  );
+}
+
+// ─── Loading view ──────────────────────────────────────────────────────────────
+function LoadingView({ step }) {
+  return (
+    <div className="text-center py-16 px-6">
+      <div className="relative w-14 h-14 mx-auto mb-7">
+        <svg width="56" height="56" viewBox="0 0 56 56" className="spinning">
+          <circle cx="28" cy="28" r="23" fill="none" stroke="rgba(59,130,246,0.12)" strokeWidth="3.5"/>
+          <circle cx="28" cy="28" r="23" fill="none" stroke="#3B82F6" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="36 108"/>
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center text-lg">⚡</div>
+      </div>
+      <div className="relative h-6 mb-7">
+        {LOADING_STEPS.map((msg,i)=>(
+          <div key={i} className="absolute inset-x-0 text-[13px] font-medium text-zinc-700 tracking-tight transition-opacity duration-500 ease-in-out"
+            style={{opacity:i===step?1:0,position:i===0?'relative':'absolute'}}>{msg}</div>
+        ))}
+      </div>
+      <div className="flex justify-center items-center gap-1.5">
+        {LOADING_STEPS.map((_,i)=>(
+          <div key={i} className="h-1.5 rounded-full transition-all duration-300 ease-out"
+            style={{width:i===step?20:6,background:i<=step?'#3B82F6':'#E4E4E7'}}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Error view ────────────────────────────────────────────────────────────────
+function ErrorView({ msg, onRetry }) {
+  const lines = (msg||'Something went wrong.').split('\n');
+  return (
+    <div className="py-12 px-6 max-w-lg mx-auto">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <span className="text-rose-500 font-black text-base">!</span>
+        </div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-[15px] text-zinc-900 mb-2 tracking-tight">Analysis failed</h3>
+          <div className="text-[13px] text-zinc-500 leading-relaxed space-y-1 mb-5">
+            {lines.map((l,i)=>l.trim()===''?<br key={i}/>:<p key={i} className="m-0">{l}</p>)}
+          </div>
+          <Btn onClick={onRetry}>Try again</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [apiKey,   setApiKey]   = useState('');
+  const [analyst,  setAnalyst]  = useState(()=>localStorage.getItem(ANALYST_KEY)||'');
+  const [framework,setFramework]= useState(()=>localStorage.getItem(FRAMEWORK_KEY)||'US');
+  const [mode,     setMode]     = useState('form');
+  const [form,     setForm]     = useState(INIT_FORM);
+  const [freeText, setFreeText] = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [step,     setStep]     = useState(0);
+  const [result,   setResult]   = useState(null);
+  const [err,      setErr]      = useState(null);
+  const [flash,    setFlash]    = useState('');
+  const [history,  setHistory]  = useState(()=>loadHist());
+  const [histOpen, setHistOpen] = useState(false);
+  const [regenLoading, setRegenLoading] = useState({});
+  const [auditMeta, setAuditMeta] = useState(null);
+  const intervalRef = useRef(null);
+
+  useEffect(()=>{ localStorage.setItem(ANALYST_KEY, analyst); },[analyst]);
+  useEffect(()=>{ localStorage.setItem(FRAMEWORK_KEY, framework); },[framework]);
+
+  // ── Handlers (logic unchanged) ──────────────────────────────────────────────
+  const upd = (k,v) => setForm(p=>({...p,[k]:v}));
+  const toggleNeed = n => setForm(p=>({...p, bankingNeeds:p.bankingNeeds.includes(n)?p.bankingNeeds.filter(x=>x!==n):[...p.bankingNeeds,n]}));
+  const loadSample = key => { setForm(SAMPLES[key]); setMode('form'); setResult(null); setErr(null); setAuditMeta(null); window.scrollTo({top:0,behavior:'smooth'}); };
+
+  const buildPrompt = () => mode==='freetext'
+    ? `Client profile raw notes:\n\n${freeText}\n\nExtract all relevant information and analyze.`
+    : `Client Profile:\nName: ${form.clientName}\nBusiness Type: ${form.businessType}\nIndustry: ${form.industry}\nSub-Industry: ${form.subIndustry}\nAnnual Revenue: ${form.revenueRange}\nEmployees: ${form.employees}\nGeography: ${form.geography}\nBanking Needs: ${form.bankingNeeds.join(', ')}\nKnown Risk Factors: ${form.riskFactors}\nSource of Funds: ${form.sourceOfFunds}\nExisting Banking: ${form.existingBanking}\nRM Notes: ${form.rmNotes}`;
+
+  const doFlash = (msg,fn) => { fn(); setFlash(msg); setTimeout(()=>setFlash(''),2200); };
+
+  const analyze = async () => {
+    const key = apiKey.trim();
+    if (!key) { setErr('Enter your Anthropic API key to continue.'); return; }
+    if (!key.startsWith('sk-ant-')) { setErr("That doesn't look like an Anthropic API key — it should start with sk-ant-"); return; }
+    const prompt = buildPrompt();
+    if (mode==='form' && !form.clientName.trim()) { setErr('Enter at least the client name.'); return; }
+    if (mode==='freetext' && !freeText.trim()) { setErr('Paste some client notes to analyze.'); return; }
+    setLoading(true); setResult(null); setErr(null); setStep(0); setAuditMeta(null);
+    intervalRef.current = setInterval(()=>setStep(s=>Math.min(s+1,LOADING_STEPS.length-1)),950);
+    try {
+      let res;
+      try {
+        res = await fetch('/api/messages',{
+          method:'POST',
+          headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},
+          body:JSON.stringify({
+            model:'claude-sonnet-4-5',
+            max_tokens:4000,
+            system: buildSystemPrompt(framework),
+            messages:[{role:'user',content:prompt}]
+          })
+        });
+      } catch(netErr) {
+        console.error('[ClientIQ] Network error:',netErr);
+        throw new Error('Could not reach the API proxy. Make sure server.py is running (python3 server.py).');
+      }
+      clearInterval(intervalRef.current);
+      if (!res.ok) {
+        const body = await res.json().catch(()=>({}));
+        console.error('[ClientIQ] API error:',res.status,body);
+        throw new Error(body?.error?.message||`API error ${res.status} — check your API key`);
+      }
+      const data = await res.json();
+      const text = data.content?.[0]?.text||'';
+      console.log('[ClientIQ] raw length:',text.length,'— first 200:',text.slice(0,200));
+      let parsed;
+      try {
+        let clean = text.replace(/^```(?:json)?[\r\n]*/i,'').replace(/[\r\n]*```\s*$/i,'').trim();
+        const start = clean.indexOf('{'); const end = clean.lastIndexOf('}');
+        if (start===-1||end===-1) throw new Error('no JSON object found');
+        parsed = JSON.parse(clean.slice(start,end+1));
+      } catch(pe) {
+        console.error('[ClientIQ] parse failed. raw:',text);
+        throw new Error('Could not parse AI response as JSON. Try again.');
+      }
+      const meta = { analyst, framework, date: new Date().toISOString(), model:'claude-sonnet-4-5' };
+      setResult(parsed);
+      setAuditMeta(meta);
+      // Save to history
+      const entry = {
+        id: Date.now().toString(),
+        clientName: mode==='form'?(form.clientName||'Unnamed'):'Pasted Profile',
+        riskScore: parsed.riskScore,
+        riskTier: parsed.riskTier,
+        date: meta.date,
+        analyst, framework,
+        form: mode==='form'?{...form}:{...INIT_FORM},
+        freeText: mode==='freetext'?freeText:'',
+        mode,
+        result: parsed,
+      };
+      setHistory(prev=>{
+        const next = [entry,...prev.filter(h=>h.clientName!==entry.clientName||h.date!==entry.date)].slice(0,MAX_HIST);
+        try { localStorage.setItem(HIST_KEY,JSON.stringify(next)); } catch {}
+        return next;
+      });
+    } catch(e) {
+      clearInterval(intervalRef.current);
+      console.error('[ClientIQ] analyze error:',e);
+      setErr(e.message||'Something went wrong.');
+    } finally { setLoading(false); }
+  };
+
+  // ── Per-section regeneration ────────────────────────────────────────────────
+  const regenerateSection = async (sectionKey) => {
+    const key = apiKey.trim();
+    if (!key||!result) return;
+    setRegenLoading(p=>({...p,[sectionKey]:true}));
+    const cfg = REGEN[sectionKey];
+    try {
+      const res = await fetch('/api/messages',{
+        method:'POST',
+        headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-5',
+          max_tokens:800,
+          system:`You are a senior financial services compliance AI. ${FRAMEWORKS[framework]?.context||''}. ${cfg.prompt}`,
+          messages:[{role:'user',content:buildPrompt()}]
+        })
+      });
+      const data = await res.json();
+      const text = (data.content?.[0]?.text||'').replace(/^```(?:json)?[\r\n]*/i,'').replace(/[\r\n]*```\s*$/i,'').trim();
+      let value;
+      if (cfg.isArray) {
+        const s=text.indexOf('['),e=text.lastIndexOf(']');
+        value = JSON.parse(s>=0&&e>=0?text.slice(s,e+1):text);
+      } else {
+        value = text.startsWith('"')?JSON.parse(text):text;
+      }
+      setResult(p=>({...p,[sectionKey]:value}));
+      setFlash(`${cfg.label} updated`); setTimeout(()=>setFlash(''),2200);
+    } catch(e) {
+      console.error('[ClientIQ] regen error:',e);
+      setFlash('Regeneration failed — try again'); setTimeout(()=>setFlash(''),2200);
+    } finally {
+      setRegenLoading(p=>({...p,[sectionKey]:false}));
+    }
+  };
+
+  // ── History actions ─────────────────────────────────────────────────────────
+  const loadFromHistory = h => {
+    setForm(h.form||INIT_FORM);
+    setFreeText(h.freeText||'');
+    setMode(h.mode||'form');
+    setResult(h.result);
+    setAuditMeta({analyst:h.analyst,framework:h.framework,date:h.date,model:'claude-sonnet-4-5'});
+    setErr(null);
+    setHistOpen(false);
+    window.scrollTo({top:0,behavior:'smooth'});
+  };
+  const deleteFromHistory = (id,e) => {
+    e.stopPropagation();
+    setHistory(prev=>{
+      const next = id==='__all__'?[]:prev.filter(h=>h.id!==id);
+      try { localStorage.setItem(HIST_KEY,JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // ── Copy / Share ─────────────────────────────────────────────────────────────
+  const copyReport = () => doFlash('Report copied!', ()=>{
+    if (!result) return;
+    navigator.clipboard.writeText(`CLIENT INTELLIGENCE BRIEF — ${form.clientName||'Client'}\n${'─'.repeat(50)}\nRisk Score: ${result.riskScore}/100 (${result.riskTier} Risk)\nFramework: ${FRAMEWORKS[framework]?.short}\nAnalyst: ${analyst||'—'}\n\nSNAPSHOT\n${result.clientSnapshot}\n\nRISK EXPLANATION\n${result.riskExplanation}\n\nRED FLAGS\n${result.redFlags?.length?result.redFlags.map(f=>`• ${f}`).join('\n'):'None.'}\n\nKYC FLAGS\n${result.kycFlags?.map(f=>`• [${f.priority}] ${f.flag}${f.citation?' ('+f.citation+')':''} — ${f.action}`).join('\n')}\n\nKEY QUESTIONS\n${result.keyQuestions?.map((q,i)=>`${i+1}. ${q}`).join('\n')}\n\nRM BRIEF\n${result.relationshipManagerBrief}\n\nDISCLAIMER: AI-generated. Not a regulatory determination. Requires human compliance review.\n─ Generated by ClientIQ`);
+  });
+
+  const shareSlack = () => doFlash('Copied for Slack!', ()=>{
+    if (!result) return;
+    navigator.clipboard.writeText(`📊 *ClientIQ Brief — ${form.clientName||'Client'}*\nRisk: *${result.riskScore}/100 — ${result.riskTier}* | Framework: ${FRAMEWORKS[framework]?.short}\n\n${result.clientSnapshot}\n\n🚩 *Top Flag:* ${result.kycFlags?.[0]?.flag||'None'}\n📦 *Products:* ${result.productFit?.slice(0,3)?.map(p=>p.product)?.join(', ')}\n📅 *Est. Onboarding:* ~${result.onboardingTimeline?.reduce((s,i)=>s+(i.days||0),0)} days\n\n⚠️ _AI-generated. Requires compliance review before use._\n_Generated by ClientIQ_`);
+  });
+
+  const handleKeyDown = e => { if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();analyze();} };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  const R = result ? (RISK[result.riskTier]||RISK.Moderate) : null;
+  const totalDays = result?.onboardingTimeline?.reduce((s,i)=>s+(i.days||0),0)||0;
+
+  return (
+    <div className="min-h-screen font-sans" style={{fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif"}}>
+
+      {/* ── History drawer ──────────────────────────────────────────────────── */}
+      {histOpen && <HistoryPanel history={history} onLoad={loadFromHistory} onDelete={deleteFromHistory} onClose={()=>setHistOpen(false)}/>}
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header className="relative overflow-hidden border-b" style={{background:'#09090B',borderColor:'rgba(255,255,255,0.06)'}}>
+        <div className="grid-bg absolute inset-0"/>
+        <div className="absolute inset-0 pointer-events-none" style={{background:'radial-gradient(ellipse 60% 120% at 50% -10%, rgba(59,130,246,0.07) 0%, transparent 70%)'}}/>
+        <div className="relative z-10 max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.12)'}}>
+              <div className="w-2.5 h-2.5 bg-white rotate-45 rounded-sm" style={{opacity:0.9}}/>
+            </div>
+            <span className="font-semibold text-[16px] text-white tracking-tight">Client<span style={{color:'rgba(255,255,255,0.32)'}}>IQ</span></span>
+            <div className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-widest uppercase" style={{background:'rgba(59,130,246,0.15)',border:'1px solid rgba(59,130,246,0.25)',color:'#93C5FD'}}>BETA</div>
+            {/* History button */}
+            <button onClick={()=>setHistOpen(true)}
+              className="no-print ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all duration-200 hover:bg-white/10 cursor-pointer"
+              style={{color:'rgba(255,255,255,0.45)',border:'1px solid rgba(255,255,255,0.1)'}}>
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="7" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="1" y="7" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="7" y="7" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/></svg>
+              History {history.length>0&&`(${history.length})`}
+            </button>
+          </div>
+          <span className="text-[12px] flex items-center gap-1.5" style={{color:'rgba(255,255,255,0.28)'}}>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" style={{boxShadow:'0 0 6px #34D399'}}/>
+            Intelligent onboarding for financial services
+          </span>
+        </div>
+      </header>
+
+      {/* ── Toast ──────────────────────────────────────────────────────────── */}
+      {flash && (
+        <div className="fixed top-5 left-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-medium text-white shadow-2xl no-print"
+          style={{transform:'translateX(-50%)',background:'#09090B',border:'1px solid rgba(255,255,255,0.1)',animation:'slideIn 0.2s ease-out'}}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6L4.5 8.5L10 3" stroke="#10B981" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          {flash}
+        </div>
+      )}
+
+      {/* ── Main ───────────────────────────────────────────────────────────── */}
+      <main className="page-wrap max-w-6xl mx-auto px-6 py-7 pb-24">
+
+        {/* ── API Key + Analyst Row ─────────────────────────────────────────── */}
+        <div className="bg-white border border-zinc-900/[0.07] rounded-xl shadow-sm mb-5 overflow-hidden no-print">
+          {/* Row 1: API Key */}
+          <div className="flex items-center gap-3.5 flex-wrap px-4 py-3 border-b border-zinc-100">
+            <div className="flex items-center gap-2">
+              <svg width="12" height="13" viewBox="0 0 12 13" fill="none" className="text-zinc-400">
+                <path d="M8.5 5.5V4a2.5 2.5 0 0 0-5 0v1.5M2 5.5h8a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5z" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+              </svg>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 whitespace-nowrap">Anthropic API Key</span>
+            </div>
+            <div className="w-px h-3.5 bg-zinc-200"/>
+            <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-ant-api03-…"
+              className="flex-1 min-w-48 px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-zinc-50 font-mono text-[12px] text-zinc-900 placeholder:text-zinc-400 tracking-wide transition-all duration-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white"/>
+            <span className="text-[11px] text-zinc-400">In-session only · never logged</span>
+          </div>
+          {/* Row 2: Analyst + Framework */}
+          <div className="flex items-center gap-3.5 flex-wrap px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className="text-zinc-400">
+                <circle cx="6" cy="4" r="2.5" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M1 11c0-2.21 2.239-4 5-4s5 1.79 5 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 whitespace-nowrap">Analyst</span>
+            </div>
+            <input value={analyst} onChange={e=>setAnalyst(e.target.value)} placeholder="Your name (optional)"
+              className="w-40 px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-zinc-50 text-[12px] text-zinc-900 placeholder:text-zinc-400 transition-all duration-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white"/>
+            <div className="w-px h-3.5 bg-zinc-200"/>
+            <div className="flex items-center gap-2">
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className="text-zinc-400">
+                <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M6 1c0 0 2 2 2 5s-2 5-2 5M6 1c0 0-2 2-2 5s2 5 2 5M1 6h10" stroke="currentColor" strokeWidth="1.1"/>
+              </svg>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 whitespace-nowrap">Framework</span>
+            </div>
+            <select value={framework} onChange={e=>setFramework(e.target.value)}
+              className="px-2.5 py-1.5 pr-7 rounded-lg border border-zinc-200 bg-zinc-50 text-[12px] text-zinc-700 transition-all duration-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 cursor-pointer">
+              {Object.entries(FRAMEWORKS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <div className="text-[11px] text-zinc-400 ml-auto">
+              ⚠️ Client data is sent to Anthropic's API —{' '}
+              <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener" className="text-blue-500 hover:underline">privacy policy</a>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sample Profiles ───────────────────────────────────────────────── */}
+        <div className="mb-6 no-print">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Quick Start — Sample Profiles</div>
+          <div className="flex gap-2.5 flex-wrap">
+            {[
+              {k:'crypto',icon:'◈',name:'Crypto Startup',sub:'DeFi · Series A · Elevated risk'},
+              {k:'manufacturing',icon:'◉',name:'Mid-Market Manufacturing',sub:'Family-owned · $50M · Moderate'},
+              {k:'hnw',icon:'◎',name:'High-Net-Worth Individual',sub:'Tech exec · $15M NW · Low–Moderate'},
+            ].map(s=>(
+              <button key={s.k} onClick={()=>loadSample(s.k)}
+                className="group px-4 py-2.5 rounded-xl border border-zinc-900/[0.08] bg-white text-left font-sans cursor-pointer transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-md hover:border-blue-400/30">
+                <div className="text-[13px] font-medium text-zinc-900 tracking-tight mb-0.5 group-hover:text-blue-700 transition-colors duration-200">
+                  <span className="text-zinc-400 mr-1.5 text-[11px]">{s.icon}</span>{s.name}
+                </div>
+                <div className="text-[11px] text-zinc-400 tracking-wide">{s.sub}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Input Panel ───────────────────────────────────────────────────── */}
+        <div className="bg-white border border-zinc-900/[0.07] rounded-xl shadow-sm mb-6 overflow-hidden no-print">
+          <div className="px-5 py-3.5 border-b border-zinc-900/[0.06] bg-gradient-to-r from-white via-zinc-50/30 to-blue-50/20 flex justify-between items-center flex-wrap gap-3">
+            <div>
+              <h2 className="font-semibold text-[14px] text-zinc-900 tracking-tight">Client Profile</h2>
+              <p className="text-[11px] text-zinc-400 mt-0.5">Structured form or raw notes from a sales call or CRM</p>
+            </div>
+            <div className="flex bg-zinc-100 rounded-lg p-0.5 gap-0.5">
+              {[{v:'form',l:'Structured Form'},{v:'freetext',l:'Paste Notes'}].map(({v,l})=>(
+                <button key={v} onClick={()=>setMode(v)}
+                  className={mode===v
+                    ?'px-3 py-1.5 rounded-md text-[12px] font-medium bg-white text-zinc-900 shadow-sm transition-all duration-200 ease-out cursor-pointer'
+                    :'px-3 py-1.5 rounded-md text-[12px] font-medium bg-transparent text-zinc-500 hover:text-zinc-700 transition-all duration-200 ease-out cursor-pointer'}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div className="p-5">
+            {mode==='form' ? (
+              <div className="flex flex-col gap-6">
+                <section>
+                  <SectionRule label="Client Identity"/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}} className="two-col">
+                    <Input label="Client Name" value={form.clientName} onChange={v=>upd('clientName',v)} placeholder="Acme Corp or Jane Smith"/>
+                    <Input label="Business Type" value={form.businessType} onChange={v=>upd('businessType',v)} placeholder="C-Corp, LLC, Individual…"/>
+                  </div>
+                </section>
+                <section>
+                  <SectionRule label="Industry"/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}} className="two-col">
+                    <Select label="Industry" value={form.industry} onChange={v=>upd('industry',v)} placeholder="Select industry"
+                      options={['Financial Technology','Banking & Finance','Manufacturing','Technology','Healthcare','Real Estate','Retail & E-Commerce','Energy & Resources','Private Wealth','Crypto & Digital Assets','Professional Services','Other']}/>
+                    <Input label="Sub-Industry" value={form.subIndustry} onChange={v=>upd('subIndustry',v)} placeholder="e.g. SaaS, DeFi, Auto Parts"/>
+                  </div>
+                </section>
+                <section>
+                  <SectionRule label="Financial Profile"/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}} className="three-col">
+                    <Select label="Annual Revenue" value={form.revenueRange} onChange={v=>upd('revenueRange',v)} placeholder="Select range"
+                      options={['Under $1M','$1M – $5M','$5M – $25M','$25M – $100M','$100M – $500M','$500M+','N/A']}/>
+                    <Select label="Employees" value={form.employees} onChange={v=>upd('employees',v)} placeholder="Select range"
+                      options={['1–10','10–25','25–100','100–250','250–500','500–1000','1000+','N/A']}/>
+                    <Select label="Geographic Footprint" value={form.geography} onChange={v=>upd('geography',v)} placeholder="Select"
+                      options={['Domestic','International','Both']}/>
+                  </div>
+                </section>
+                <section>
+                  <SectionRule label="Primary Banking Needs"/>
+                  <div className="flex flex-wrap gap-2">
+                    {BANKING_NEEDS.map(n=><Chip key={n} label={n} active={form.bankingNeeds.includes(n)} onClick={()=>toggleNeed(n)}/>)}
+                  </div>
+                </section>
+                <section>
+                  <SectionRule label="Risk & Compliance"/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}} className="two-col">
+                    <Textarea label="Known Risk Factors" value={form.riskFactors} onChange={v=>upd('riskFactors',v)}
+                      placeholder="Adverse media, complex structures, high-risk jurisdictions, sanctions exposure…" rows={3}/>
+                    <Textarea label="Source of Funds" value={form.sourceOfFunds} onChange={v=>upd('sourceOfFunds',v)}
+                      placeholder="Where does the client's wealth originate?" rows={3}/>
+                  </div>
+                </section>
+                <section>
+                  <SectionRule label="Relationship Context"/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}} className="two-col">
+                    <Input label="Existing Banking Relationships" value={form.existingBanking} onChange={v=>upd('existingBanking',v)} placeholder="Current banks, brokerages, lending relationships…"/>
+                    <Input label="Relationship Manager Notes" sub="(optional)" value={form.rmNotes} onChange={v=>upd('rmNotes',v)} placeholder="Referral source, call notes, competitive intel…"/>
+                  </div>
+                </section>
+              </div>
+            ) : (
+              <div>
+                <Label>Paste raw notes, CRM export, email thread, or LinkedIn profile</Label>
+                <textarea value={freeText} onChange={e=>setFreeText(e.target.value)} onKeyDown={handleKeyDown}
+                  placeholder={`Paste anything here — sales call notes, CRM record, email thread, deal memo…\n\nThe AI will extract all relevant details automatically.\n\nPress ⌘+Enter to analyze.`}
+                  rows={12}
+                  className="w-full px-4 py-3 rounded-xl border border-zinc-900/[0.09] bg-zinc-50/50 text-[13px] text-zinc-900 placeholder:text-zinc-400 resize-y leading-relaxed transition-all duration-200 ease-out focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white"/>
+                <div className="text-[11px] text-zinc-400 mt-2">
+                  More context = more specific output. Press <kbd className="px-1.5 py-0.5 rounded-md bg-zinc-100 border border-zinc-200 text-[11px] font-mono text-zinc-500">⌘ Enter</kbd> to analyze.
+                </div>
+              </div>
+            )}
+            <div className="mt-5 flex justify-end">
+              <Btn onClick={analyze} disabled={loading}>
+                {loading
+                  ? <><svg width="13" height="13" viewBox="0 0 13 13" className="spinning" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5"/><path d="M6.5 1.5A5 5 0 0 1 11.5 6.5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>Analyzing…</>
+                  : <>⚡ Generate Intelligence Brief</>}
+              </Btn>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Loading ───────────────────────────────────────────────────────── */}
+        {loading && (
+          <div className="bg-white border border-zinc-900/[0.07] rounded-xl shadow-sm overflow-hidden">
+            <div className="h-0.5 bg-gradient-to-r from-blue-500 via-blue-400 to-transparent"/>
+            <LoadingView step={step}/>
+          </div>
+        )}
+
+        {/* ── Error ─────────────────────────────────────────────────────────── */}
+        {err && !loading && (
+          <div className="bg-white border border-rose-500/20 rounded-xl shadow-sm">
+            <ErrorView msg={err} onRetry={analyze}/>
+          </div>
+        )}
+
+        {/* ── Results ───────────────────────────────────────────────────────── */}
+        {result && !loading && (
+          <div>
+            {/* Print-only header */}
+            {auditMeta && (
+              <PrintHeader
+                clientName={form.clientName||(mode==='freetext'?'Pasted Profile':'Client')}
+                analyst={auditMeta.analyst} framework={auditMeta.framework}
+                date={auditMeta.date} riskScore={result.riskScore} riskTier={result.riskTier}/>
+            )}
+
+            {/* Report toolbar */}
+            <div className="flex justify-between items-start mb-5 flex-wrap gap-3 no-print">
+              <div>
+                <h2 className="font-semibold text-[18px] text-zinc-900 tracking-tight">Intelligence Brief</h2>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-[11px] text-zinc-400 font-mono">{form.clientName||'Client'}</span>
+                  <span className="text-zinc-300">·</span>
+                  <span className="text-[11px] text-zinc-400">{auditMeta&&new Date(auditMeta.date).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>
+                  {auditMeta?.analyst && <><span className="text-zinc-300">·</span><span className="text-[11px] text-zinc-500">by {auditMeta.analyst}</span></>}
+                  {auditMeta?.framework && <><span className="text-zinc-300">·</span><span className="text-[11px] font-mono text-blue-500">{FRAMEWORKS[auditMeta.framework]?.short}</span></>}
+                  <span className="text-zinc-300">·</span>
+                  <span className="text-[10px] font-mono text-zinc-400">claude-sonnet-4-5</span>
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Btn variant="ghost" small onClick={shareSlack}>↗ Share (Slack)</Btn>
+                <Btn variant="ghost" small onClick={copyReport}>⊡ Copy Report</Btn>
+                <Btn small onClick={()=>window.print()}>↓ Download PDF</Btn>
+              </div>
+            </div>
+
+            {/* Row 1: Snapshot + Risk Gauge */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 260px',gap:12,marginBottom:12,alignItems:'start'}} className="top-row">
+              <Card title="Client Snapshot" icon="🏢" accent={C.blue} delay={0}>
+                <p className="text-[14px] text-zinc-700 leading-relaxed tracking-tight">{result.clientSnapshot}</p>
+              </Card>
+              <div className="fade-up bg-white border border-zinc-900/[0.07] rounded-xl shadow-sm overflow-hidden" style={{borderTop:`2px solid ${R.color}`,animationDelay:'80ms'}}>
+                <div className="px-4 pt-5 pb-3 text-center">
+                  <Tooltip text="0 = no risk · 100 = maximum risk. Reflects KYC/AML complexity, regulatory exposure, beneficial ownership opacity, and onboarding friction. Not a regulatory determination.">
+                    <RiskGauge score={result.riskScore} tier={result.riskTier}/>
+                  </Tooltip>
+                </div>
+                <div className="px-4 pb-2 text-left border-t border-zinc-100 pt-3">
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">{result.riskExplanation}</p>
+                  <ThresholdLegend score={result.riskScore}/>
+                </div>
+              </div>
+            </div>
+
+            {/* Red Flags */}
+            {result.redFlags?.length>0 && (
+              <div className="mb-3">
+                <Card title="Red Flags" icon="⚑" accent={C.red} delay={160}>
+                  <div className="flex flex-col gap-1.5">
+                    {result.redFlags.map((f,i)=>(
+                      <div key={i} className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg transition-all duration-200 hover:bg-rose-50/80"
+                        style={{background:'rgba(244,63,94,0.05)',border:'1px solid rgba(244,63,94,0.12)'}}>
+                        <div className="w-3.5 h-3.5 rounded-[3px] flex items-center justify-center flex-shrink-0 mt-0.5" style={{background:C.red}}>
+                          <span className="text-white font-black" style={{fontSize:8}}>!</span>
+                        </div>
+                        <span className="text-[13px] leading-relaxed" style={{color:'#881337'}}>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* KYC Flags */}
+            <div className="mb-3">
+              <Card title="KYC / AML Flag Analysis" icon="◎" accent={C.amber} delay={240}
+                onRegenerate={()=>regenerateSection('kycFlags')} regenerating={regenLoading.kycFlags}>
+                <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50/60 border border-amber-200/50">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-amber-500 flex-shrink-0 mt-0.5">
+                    <path d="M6 1L11 10H1L6 1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                    <path d="M6 5v2.5M6 9v.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  <p className="text-[11px] text-amber-800 leading-snug">AI-generated flags require verification against real-time OFAC SDN, UN, and EU sanctions lists before onboarding decisions. Regulatory citations are indicative only.</p>
+                </div>
+                {result.kycFlags?.map((f,i)=>(
+                  <KYCFlag key={i} {...f} last={i===result.kycFlags.length-1}/>
+                ))}
+              </Card>
+            </div>
+
+            {/* Documents + Product Fit */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}} className="two-col">
+              <Card title="Document Checklist" icon="▤" accent={C.green} delay={320}
+                onRegenerate={()=>regenerateSection('documentChecklist')} regenerating={regenLoading.documentChecklist}>
+                {result.documentChecklist?.map((d,i)=>(
+                  <DocItem key={i} {...d} last={i===result.documentChecklist.length-1}/>
+                ))}
+              </Card>
+              <Card title="Product Fit Analysis" icon="◈" accent={C.blue} delay={400}
+                onRegenerate={()=>regenerateSection('productFit')} regenerating={regenLoading.productFit}>
+                {result.productFit?.map((p,i)=><FitBar key={i} {...p}/>)}
+              </Card>
+            </div>
+
+            {/* RM Brief */}
+            <div className="mb-3">
+              <Card title="Relationship Manager Brief" icon="◉" accent={C.ink8} delay={480}
+                onRegenerate={()=>regenerateSection('relationshipManagerBrief')} regenerating={regenLoading.relationshipManagerBrief}>
+                <p className="text-[13px] text-zinc-700 leading-relaxed tracking-tight italic"
+                  style={{borderLeft:'2px solid rgba(59,130,246,0.2)',paddingLeft:14}}>
+                  {result.relationshipManagerBrief}
+                </p>
+              </Card>
+            </div>
+
+            {/* Timeline + Key Questions */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}} className="two-col">
+              <Card title="Estimated Onboarding Timeline" icon="◫" accent={C.blue} delay={560}>
+                {result.onboardingTimeline?.map((item,i)=>(
+                  <TimelineItem key={i} {...item} index={i} isLast={i===result.onboardingTimeline.length-1}/>
+                ))}
+                {totalDays>0 && (
+                  <div className="mt-3 px-3 py-2 rounded-lg bg-zinc-50 border border-zinc-200 text-center">
+                    <span className="text-[11px] text-zinc-500">Total estimated: </span>
+                    <span className="font-mono text-[12px] font-semibold text-zinc-900">{totalDays}</span>
+                    <span className="text-[11px] text-zinc-500"> business days</span>
+                  </div>
+                )}
+              </Card>
+              <Card title="Key Questions for First Meeting" icon="◑" accent={C.purple} delay={640}
+                onRegenerate={()=>regenerateSection('keyQuestions')} regenerating={regenLoading.keyQuestions}>
+                <div className="flex flex-col">
+                  {result.keyQuestions?.map((q,i)=>(
+                    <div key={i} className={`flex gap-3 items-start py-2.5 px-2 -mx-2 rounded-lg transition-all duration-200 hover:bg-zinc-50 ${i<result.keyQuestions.length-1?'border-b border-zinc-900/[0.05]':''}`}>
+                      <span className="font-mono text-[10px] font-bold text-zinc-400 flex-shrink-0 pt-0.5 min-w-[18px]">{String(i+1).padStart(2,'0')}</span>
+                      <p className="m-0 text-[13px] text-zinc-700 leading-relaxed tracking-tight">{q}</p>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
+            {/* Competitive Intelligence */}
+            <Card title="Competitive Intelligence" icon="◐" accent={C.purple} delay={720}
+              onRegenerate={()=>regenerateSection('competitiveIntel')} regenerating={regenLoading.competitiveIntel}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:0}}>
+                {result.competitiveIntel?.map((item,i)=><CompCard key={i} {...item}/>)}
+              </div>
+            </Card>
+
+            {/* Print-only disclaimer footer */}
+            <div className="print-only mt-8 pt-4" style={{borderTop:'1px solid #E4E4E7'}}>
+              <p className="text-[9px] text-zinc-500 leading-snug">
+                DISCLAIMER: This Client Intelligence Brief is generated by artificial intelligence (Anthropic claude-sonnet-4-5) and is provided for informational purposes only. It does not constitute a regulatory determination, legal advice, or a substitute for human compliance review. Sanctions screening information is AI-derived and must be verified against real-time databases (OFAC SDN, UN Consolidated, EU Financial Sanctions). All findings must be reviewed and approved by a qualified compliance officer prior to any onboarding decision. Regulatory citations are indicative only and may not reflect the most current guidance. ClientIQ | Confidential
+              </p>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ── Powered by Claude ─────────────────────────────────────────────── */}
+      <div className="no-print fixed bottom-5 right-5 flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-medium z-50"
+        style={{background:'rgba(9,9,11,0.92)',border:'1px solid rgba(255,255,255,0.09)',backdropFilter:'blur(12px)',color:'rgba(255,255,255,0.6)',boxShadow:'0 8px 32px rgba(0,0,0,0.3)'}}>
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{animation:'blink 2.5s ease-in-out infinite',boxShadow:'0 0 5px #34D399'}}/>
+        Powered by Claude
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
