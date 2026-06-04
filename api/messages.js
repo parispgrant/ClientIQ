@@ -1,41 +1,26 @@
 /**
  * ClientIQ — Anthropic API proxy
- * Vercel Edge Runtime: no cold starts, handles long I/O well.
- *
- * Forwards POST /api/messages → Anthropic server-side.
- * The user's API key is passed per-request and never stored.
+ * Node.js Serverless Function (NOT Edge) so that vercel.json
+ * maxDuration: 60 is respected — giving us a full 60s for the
+ * Anthropic response instead of the Edge Runtime's 30s default.
  */
-export const config = { runtime: 'edge' };
 
-export default async function handler(req) {
-  const cors = {
-    'Access-Control-Allow-Origin':  '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version',
-  };
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin',  '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
 
-  // Preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: cors });
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: { message: 'Method not allowed' } }),
-      { status: 405, headers: { ...cors, 'Content-Type': 'application/json' } }
-    );
+    return res.status(405).json({ error: { message: 'Method not allowed' } });
   }
 
-  const apiKey = req.headers.get('x-api-key');
+  const apiKey = req.headers['x-api-key'];
   if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: { message: 'Missing x-api-key header' } }),
-      { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
-    );
+    return res.status(400).json({ error: { message: 'Missing x-api-key header' } });
   }
 
   try {
-    const body = await req.json();
-
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -43,18 +28,13 @@ export default async function handler(req) {
         'anthropic-version': '2023-06-01',
         'content-type':      'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(req.body),
     });
 
-    const text = await upstream.text();
-    return new Response(text, {
-      status: upstream.status,
-      headers: { ...cors, 'Content-Type': 'application/json' },
-    });
+    const data = await upstream.json();
+    return res.status(upstream.status).json(data);
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }),
-      { status: 502, headers: { ...cors, 'Content-Type': 'application/json' } }
-    );
+    console.error('[ClientIQ proxy]', err.message);
+    return res.status(502).json({ error: { message: `Proxy error: ${err.message}` } });
   }
 }
