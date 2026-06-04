@@ -159,9 +159,40 @@ const loadHist     = () => { try { return JSON.parse(localStorage.getItem(HIST_K
 // ─── System prompt builder ─────────────────────────────────────────────────────
 const buildSystemPrompt = fw => `You are a senior financial services compliance AI. ${FRAMEWORKS[fw]?.context || FRAMEWORKS.US.context}
 
-Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. Strings 1-2 sentences max, arrays within limits shown. Total under 2500 tokens.
+Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. Strings 1-2 sentences max, arrays within limits shown. The JSON must be complete and self-contained, under 3500 tokens.
 
 {"clientSnapshot":"2 sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 sentences on top 3 risk drivers","kycFlags":[max 5: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"1 sentence"}],"documentChecklist":[max 8: {"document":"name","required":bool,"reason":"1 sentence"}],"productFit":[max 5: {"product":"name","fitScore":0-100,"reasoning":"1 sentence"}],"relationshipManagerBrief":"3 sentences","onboardingTimeline":[max 5: {"phase":"name","days":number,"description":"1 sentence"}],"keyQuestions":["q1","q2","q3","q4","q5"],"redFlags":["1 sentence each, max 3, empty array if none"],"competitiveIntel":[max 3: {"competitor":"name","positioning":"1 sentence"}]}`;
+
+// ─── Anthropic SSE stream reader ───────────────────────────────────────────────
+// Reads the proxied text/event-stream response, accumulates text_delta chunks,
+// and returns the full assembled string. onDelta(full) fires as text arrives.
+async function streamAnthropic(res, onDelta) {
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      let evt;
+      try { evt = JSON.parse(payload); } catch { continue; }
+      if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+        full += evt.delta.text;
+        onDelta && onDelta(full);
+      } else if (evt.type === 'error') {
+        throw new Error(evt.error?.message || 'Anthropic stream error');
+      }
+    }
+  }
+  return full;
+}
 
 // ─── Static class maps ─────────────────────────────────────────────────────────
 const PRI_BADGE = {
@@ -631,7 +662,8 @@ function App() {
           headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},
           body:JSON.stringify({
             model:'claude-sonnet-4-5',
-            max_tokens:2500,
+            max_tokens:4000,
+            stream:true,
             system: buildSystemPrompt(framework),
             messages:[{role:'user',content:prompt}]
           })
@@ -640,14 +672,15 @@ function App() {
         console.error('[ClientIQ] Network error:',netErr);
         throw new Error('Could not reach the API proxy. Make sure server.py is running (python3 server.py).');
       }
-      clearInterval(intervalRef.current);
       if (!res.ok) {
+        clearInterval(intervalRef.current);
         const body = await res.json().catch(()=>({}));
         console.error('[ClientIQ] API error:',res.status,body);
         throw new Error(body?.error?.message||`API error ${res.status} — check your API key`);
       }
-      const data = await res.json();
-      const text = data.content?.[0]?.text||'';
+      const text = await streamAnthropic(res);
+      clearInterval(intervalRef.current);
+      setStep(LOADING_STEPS.length-1);
       console.log('[ClientIQ] raw length:',text.length,'— first 200:',text.slice(0,200));
       let parsed;
       try {
