@@ -159,9 +159,9 @@ const loadHist     = () => { try { return JSON.parse(localStorage.getItem(HIST_K
 // ─── System prompt builder ─────────────────────────────────────────────────────
 const buildSystemPrompt = fw => `You are a senior financial services compliance AI. ${FRAMEWORKS[fw]?.context || FRAMEWORKS.US.context}
 
-Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. Strings 1-2 sentences max, arrays within limits shown. The JSON must be complete and self-contained, under 3500 tokens.
+Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. BE TERSE: every "action", "reason" and "reasoning" must be ONE sentence of 18 words or fewer. Respect every array limit exactly — do not exceed it. The complete JSON must fit well under 2000 tokens. Brevity is mandatory; a complete short response is far better than a detailed truncated one.
 
-{"clientSnapshot":"2 sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 sentences on top 3 risk drivers","kycFlags":[max 5: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"1 sentence"}],"documentChecklist":[max 8: {"document":"name","required":bool,"reason":"1 sentence"}],"productFit":[max 5: {"product":"name","fitScore":0-100,"reasoning":"1 sentence"}],"relationshipManagerBrief":"3 sentences","onboardingTimeline":[max 5: {"phase":"name","days":number,"description":"1 sentence"}],"keyQuestions":["q1","q2","q3","q4","q5"],"redFlags":["1 sentence each, max 3, empty array if none"],"competitiveIntel":[max 3: {"competitor":"name","positioning":"1 sentence"}]}`;
+{"clientSnapshot":"2 short sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 short sentences, top 3 risk drivers","kycFlags":[max 4: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"≤18 words"}],"documentChecklist":[max 5: {"document":"name","required":bool,"reason":"≤18 words"}],"productFit":[max 4: {"product":"name","fitScore":0-100,"reasoning":"≤18 words"}],"relationshipManagerBrief":"2 short sentences","onboardingTimeline":[max 4: {"phase":"name","days":number,"description":"≤12 words"}],"keyQuestions":["q1","q2","q3","q4"],"redFlags":["≤18 words each, max 3, empty array if none"],"competitiveIntel":[max 2: {"competitor":"name","positioning":"≤12 words"}]}`;
 
 // ─── Anthropic SSE stream reader ───────────────────────────────────────────────
 // Reads the proxied text/event-stream response, accumulates text_delta chunks,
@@ -192,6 +192,58 @@ async function streamAnthropic(res, onDelta) {
     }
   }
   return full;
+}
+
+// ─── Tolerant JSON parser ──────────────────────────────────────────────────────
+// Parses the model's reply. If the response was cut short (e.g. a slow
+// generation hit a serverless time limit mid-stream), it trims back to the last
+// complete element and closes any open strings/brackets so we still render a
+// partial brief instead of throwing a hard error.
+function parseModelJson(raw) {
+  let s = (raw || '').replace(/^```(?:json)?[\r\n]*/i, '').replace(/[\r\n]*```\s*$/i, '').trim();
+  const start = s.indexOf('{');
+  if (start < 0) throw new Error('no JSON object found');
+  s = s.slice(start);
+
+  // Fast path: already valid (the normal, complete case).
+  try { return JSON.parse(s); } catch (_) {}
+
+  // Repair path: walk the string, tracking string state and the last index at
+  // which a top-level element finished cleanly (right after a } or ]).
+  let inStr = false, esc = false, lastSafe = -1;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '}' || c === ']') lastSafe = i + 1;
+  }
+
+  // Drop the dangling, half-written tail after the last completed element.
+  let repaired = (lastSafe > 0 ? s.slice(0, lastSafe) : s).replace(/[,\s]+$/, '');
+
+  // Recompute the bracket stack on the trimmed text and close what's still open.
+  const stack = [];
+  inStr = false; esc = false;
+  for (let i = 0; i < repaired.length; i++) {
+    const c = repaired[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') stack.push('}');
+    else if (c === '[') stack.push(']');
+    else if (c === '}' || c === ']') stack.pop();
+  }
+  while (stack.length) repaired += stack.pop();
+  return JSON.parse(repaired);
 }
 
 // ─── Static class maps ─────────────────────────────────────────────────────────
@@ -684,10 +736,7 @@ function App() {
       console.log('[ClientIQ] raw length:',text.length,'— first 200:',text.slice(0,200));
       let parsed;
       try {
-        let clean = text.replace(/^```(?:json)?[\r\n]*/i,'').replace(/[\r\n]*```\s*$/i,'').trim();
-        const start = clean.indexOf('{'); const end = clean.lastIndexOf('}');
-        if (start===-1||end===-1) throw new Error('no JSON object found');
-        parsed = JSON.parse(clean.slice(start,end+1));
+        parsed = parseModelJson(text);
       } catch(pe) {
         console.error('[ClientIQ] parse failed. raw:',text);
         throw new Error('Could not parse AI response as JSON. Try again.');
