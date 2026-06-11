@@ -35,6 +35,16 @@ const SOURCES = [
     url: 'https://ofsistorage.blob.core.windows.net/publishlive/2022format/ConList.csv',
     parse: parseUkCsv,
   },
+  {
+    id: 'un_consolidated',
+    label: 'UN Security Council Consolidated',
+    authority: 'United Nations',
+    url: 'https://scsanctions.un.org/resources/xml/en/consolidated.xml',
+    parse: parseUnXml,
+  },
+  // EU FSF list intentionally absent: the published file is ~24MB and takes
+  // ~50s to download, which cannot fit a cold serverless invocation. Needs an
+  // offline slimming pipeline (planned v4).
 ];
 
 const OFAC_ALT_URL = 'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV';
@@ -103,6 +113,33 @@ function parseUkCsv(text) {
       };
     })
     .filter(e => e.name);
+}
+
+// UN Security Council consolidated XML: <INDIVIDUAL> blocks carry the name in
+// FIRST_NAME..FOURTH_NAME; <ENTITY> blocks carry it in FIRST_NAME. Both can
+// have *_ALIAS children with ALIAS_NAME. Regex-per-block keeps us dependency-free.
+function parseUnXml(text) {
+  const tag = (block, name) => {
+    const m = block.match(new RegExp(`<${name}>([^<]*)</${name}>`));
+    return m ? m[1].trim() : '';
+  };
+  const entries = [];
+  const blocks = text.match(/<INDIVIDUAL>[\s\S]*?<\/INDIVIDUAL>|<ENTITY>[\s\S]*?<\/ENTITY>/g) || [];
+  for (const block of blocks) {
+    const isIndividual = block.startsWith('<INDIVIDUAL>');
+    const uid = tag(block, 'DATAID');
+    const name = [tag(block, 'FIRST_NAME'), tag(block, 'SECOND_NAME'), tag(block, 'THIRD_NAME'), tag(block, 'FOURTH_NAME')]
+      .filter(Boolean).join(' ');
+    if (!name) continue;
+    const entry = { uid, name, type: isIndividual ? 'individual' : 'entity', program: tag(block, 'UN_LIST_TYPE') };
+    entries.push(entry);
+    const aliases = block.match(/<ALIAS_NAME>([^<]*)<\/ALIAS_NAME>/g) || [];
+    for (const a of aliases) {
+      const aliasName = a.replace(/<\/?ALIAS_NAME>/g, '').trim();
+      if (aliasName) entries.push({ ...entry, name: aliasName, aliasOf: entry.name });
+    }
+  }
+  return entries;
 }
 
 function parseOfacAltCsv(text) {
@@ -272,4 +309,4 @@ export default async function handler(req, res) {
   }
 }
 
-export { parseOfacCsv, parseUkCsv, parseOfacAltCsv, screenName, scoreMatch, normalize, coreTokens };
+export { parseOfacCsv, parseUkCsv, parseUnXml, parseOfacAltCsv, screenName, scoreMatch, normalize, coreTokens };

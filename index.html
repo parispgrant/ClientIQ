@@ -161,7 +161,7 @@ const buildSystemPrompt = fw => `You are a senior financial services compliance 
 
 Analyze the client profile and return ONLY a raw JSON object — no markdown fences, no preamble, no trailing text. BE TERSE: every "action", "reason" and "reasoning" must be ONE sentence of 18 words or fewer. Respect every array limit exactly — do not exceed it. The complete JSON must fit well under 2000 tokens. Brevity is mandatory; a complete short response is far better than a detailed truncated one.
 
-{"clientSnapshot":"2 short sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 short sentences, top 3 risk drivers","kycFlags":[max 4: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"≤18 words"}],"documentChecklist":[max 5: {"document":"name","required":bool,"reason":"≤18 words"}],"productFit":[max 4: {"product":"name","fitScore":0-100,"reasoning":"≤18 words"}],"relationshipManagerBrief":"2 short sentences","onboardingTimeline":[max 4: {"phase":"name","days":number,"description":"≤12 words"}],"keyQuestions":["q1","q2","q3","q4"],"redFlags":["≤18 words each, max 3, empty array if none"],"competitiveIntel":[max 2: {"competitor":"name","positioning":"≤12 words"}]}`;
+{"clientSnapshot":"2 short sentences","riskScore":0-100,"riskTier":"Low|Moderate|High|Elevated","riskExplanation":"2 short sentences, top 3 risk drivers","kycFlags":[max 4: {"flag":"short label","priority":"High|Medium|Low","confidence":"High|Medium|Low","citation":"e.g. 31 CFR §1020.220 or empty string","action":"≤18 words"}],"documentChecklist":[max 5: {"document":"name","required":bool,"reason":"≤18 words"}],"productFit":[max 4: {"product":"name","fitScore":0-100,"reasoning":"≤18 words"}],"relationshipManagerBrief":"2 short sentences","onboardingTimeline":[max 4: {"phase":"name","days":number,"description":"≤12 words"}],"keyQuestions":["q1","q2","q3","q4"],"redFlags":["≤18 words each, max 3, empty array if none"],"competitiveIntel":[max 2: {"competitor":"name","positioning":"≤12 words"}],"relatedParties":["full names of individuals or affiliated entities explicitly named in the profile (founders, officers, beneficial owners), max 4, empty array if none — names only, no titles"]}`;
 
 // ─── Anthropic SSE stream reader ───────────────────────────────────────────────
 // Reads the proxied text/event-stream response, accumulates text_delta chunks,
@@ -523,7 +523,7 @@ function RiskGauge({ score, tier }) {
 }
 
 // ─── KYC Flag (updated: confidence + citation) ────────────────────────────────
-function KYCFlag({ flag, priority, confidence, citation, action, last }) {
+function KYCFlag({ flag, priority, confidence, citation, action, last, citeInfo }) {
   const badgeCls = PRI_BADGE[priority] || PRI_BADGE['Low'];
   const confCls  = CONF_BADGE[confidence] || CONF_BADGE['Medium'];
   return (
@@ -536,7 +536,21 @@ function KYCFlag({ flag, priority, confidence, citation, action, last }) {
         <div className="font-medium text-[13px] text-zinc-900 tracking-tight mb-0.5">{flag}</div>
         <div className="text-[12px] text-zinc-500 leading-snug">{action}</div>
         {citation && (
-          <div className="mt-1 font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-block">{citation}</div>
+          citeInfo?.status==='verified' ? (
+            <a href={citeInfo.url} target="_blank" rel="noopener noreferrer"
+              title={`Verified against the official eCFR: ${citeInfo.label||citation}`}
+              className="mt-1 font-mono text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 hover:underline">
+              ✓ {citation}
+            </a>
+          ) : citeInfo?.status==='not_found' ? (
+            <span title="This citation could not be found in the current eCFR — verify before relying on it."
+              className="mt-1 font-mono text-[10px] text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
+              ✗ {citation} — not found in eCFR
+            </span>
+          ) : (
+            <span title={citeInfo?.status==='unsupported' ? 'Not a CFR citation — requires manual verification.' : 'Citation not yet verified.'}
+              className="mt-1 font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-block">{citation}</span>
+          )
         )}
       </div>
     </div>
@@ -689,13 +703,24 @@ function Spinner() {
 
 function ScreeningCard({ screening }) {
   if (!screening) return null;
-  const { sanctions, media } = screening;
+  const { sanctions, media, registry, citations } = screening;
+  let citationsSummary = null;
+  if (citations?.status==='done' && citations.map && Object.keys(citations.map).length) {
+    const v = Object.values(citations.map);
+    citationsSummary = {
+      verified: v.filter(r=>r.status==='verified').length,
+      notFound: v.filter(r=>r.status==='not_found').length,
+      unsupported: v.filter(r=>r.status==='unsupported'||r.status==='error').length,
+    };
+  }
   const sancResults = sanctions?.data?.results || [];
   const anyHit = sancResults.some(r => r.lists.some(l => l.matches.length));
   const mediaFindings = media?.data?.findings || [];
+  const multiName = sancResults.length > 1;
+  const regSources = registry?.data?.sources || [];
   return (
     <div className="mb-3">
-      <Card title="Live Screening" icon="◍" accent={anyHit || mediaFindings.length ? C.red : C.green} delay={120}>
+      <Card title="Live Screening & Verification" icon="◍" accent={anyHit || mediaFindings.length ? C.red : C.green} delay={120}>
         <div className="mb-2 flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-blue-500/10 text-blue-600 border border-blue-500/20">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"/> LIVE DATA
@@ -710,15 +735,25 @@ function ScreeningCard({ screening }) {
         {/* Sanctions lists */}
         {sanctions?.status==='skipped' && (
           <ScreenRow icon="◌" label="Sanctions screening" right={<span className="text-zinc-400">Skipped</span>}
-            sub="needs a client name — use Structured Form"/>
+            sub="no names found to screen"/>
+        )}
+        {sanctions?.status==='loading-deferred' && (
+          <ScreenRow icon={<Spinner/>} label="Sanctions screening" sub="extracting names from the profile…"/>
         )}
         {sanctions?.status==='loading' && (
-          <ScreenRow icon={<Spinner/>} label="Sanctions screening" sub="checking OFAC + UK lists…"/>
+          <ScreenRow icon={<Spinner/>} label="Sanctions screening" sub="checking OFAC, UK & UN lists…"/>
         )}
         {sanctions?.status==='error' && (
           <ScreenRow icon="⚠" label="Sanctions screening" right={<span style={{color:C.amber}}>Unavailable</span>} sub={sanctions.error}/>
         )}
-        {sanctions?.status==='done' && sancResults.map(r => r.lists.map(l => (
+        {sanctions?.status==='done' && sancResults.map((r,ri) => (
+          <React.Fragment key={ri}>
+            {multiName && (
+              <div className="pt-2.5 pb-0.5 text-[11px] font-semibold text-zinc-500 tracking-tight">
+                {ri===0 ? '◆ ' : '◇ '}{r.name}{ri>0?' (related party)':''}
+              </div>
+            )}
+            {r.lists.map(l => (
           <ScreenRow key={l.id}
             icon={l.error ? '⚠' : l.matches.length ? '⚠' : '✓'}
             label={l.label} sub={`${l.authority} · ${l.entries.toLocaleString()} entries`}
@@ -740,7 +775,58 @@ function ScreeningCard({ screening }) {
               </div>
             )}
           </ScreenRow>
-        )))}
+            ))}
+          </React.Fragment>
+        ))}
+
+        {/* Corporate registry */}
+        {registry?.status==='loading' && (
+          <ScreenRow icon={<Spinner/>} label="Corporate registry" sub="checking SEC EDGAR…"/>
+        )}
+        {registry?.status==='error' && (
+          <ScreenRow icon="⚠" label="Corporate registry" right={<span style={{color:C.amber}}>Unavailable</span>} sub={registry.error}/>
+        )}
+        {registry?.status==='done' && regSources.map(s => (
+          <ScreenRow key={s.id}
+            icon={s.status==='unconfigured' ? '◌' : s.status==='error' ? '⚠' : s.matches.length ? '✓' : '⚠'}
+            label={s.label} sub={s.authority}
+            right={s.status==='unconfigured'
+              ? <span className="text-zinc-400">Not configured</span>
+              : s.status==='error'
+                ? <span style={{color:C.amber}}>Unavailable</span>
+                : s.matches.length
+                  ? <span style={{color:C.green}}>{s.matches.length} registration{s.matches.length>1?'s':''} found</span>
+                  : <span style={{color:C.amber}}>No registration found</span>}>
+            {s.matches.length>0 && (
+              <div className="mt-2 ml-7 flex flex-col gap-1.5">
+                {s.matches.map((m,i)=>(
+                  <div key={i} className="px-3 py-2 rounded-lg text-[12px] leading-snug"
+                    style={{background:'rgba(16,185,129,0.05)',border:'1px solid rgba(16,185,129,0.15)'}}>
+                    {m.url
+                      ? <a href={m.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 hover:underline">{m.name}</a>
+                      : <span className="font-semibold text-zinc-900">{m.name}</span>}
+                    <span className="text-zinc-500"> · {[m.id,m.detail].filter(Boolean).join(' · ')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {s.status==='ok' && !s.matches.length && (
+              <p className="m-0 mt-1 ml-7 text-[11px] text-zinc-400">Absence is a signal to investigate, not proof — US state registries are not covered.</p>
+            )}
+          </ScreenRow>
+        ))}
+
+        {/* Citation verification summary */}
+        {citationsSummary && (
+          <ScreenRow icon={citationsSummary.notFound ? '⚠' : '✓'} label="Regulatory citations" sub="checked against the official eCFR"
+            right={citationsSummary.notFound
+              ? <span style={{color:C.red}}>{citationsSummary.notFound} not found</span>
+              : citationsSummary.verified
+                ? <span style={{color:C.green}}>{citationsSummary.verified} verified{citationsSummary.unsupported?` · ${citationsSummary.unsupported} manual`:''}</span>
+                : <span className="text-zinc-400">{citationsSummary.unsupported} need manual check</span>}>
+            <p className="m-0 mt-1 ml-7 text-[11px] text-zinc-400">Verified citations are linked ✓ in the KYC flags below; anything flagged ✗ does not exist in the current eCFR.</p>
+          </ScreenRow>
+        )}
 
         {/* Adverse media */}
         {media?.status==='loading' && (
@@ -834,6 +920,38 @@ function App() {
     }
   };
 
+  const runRegistry = async (name) => {
+    try {
+      const res = await fetch('/api/registry',{
+        method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({name})
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data?.error?.message||`Registry error ${res.status}`);
+      setScreening(p=>({...p, registry:{status:'done', data}}));
+    } catch(e) {
+      console.error('[ClientIQ] registry error:',e);
+      setScreening(p=>({...p, registry:{status:'error', error:e.message}}));
+    }
+  };
+
+  const runCitations = async (citations) => {
+    try {
+      const res = await fetch('/api/citations',{
+        method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({citations})
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data?.error?.message||`Citation check error ${res.status}`);
+      const map = {};
+      for (const r of data.results||[]) map[r.citation] = r;
+      setScreening(p=>({...p, citations:{status:'done', map}}));
+    } catch(e) {
+      console.error('[ClientIQ] citation check error:',e);
+      setScreening(p=>({...p, citations:{status:'error', error:e.message}}));
+    }
+  };
+
   const runAdverseMedia = async (key, subject) => {
     try {
       const res = await fetch('/api/messages',{
@@ -870,11 +988,16 @@ function App() {
     // Fire live screening in parallel — each manages its own state and can
     // fail independently without blocking the brief.
     const screenName = mode==='form' ? form.clientName.trim() : '';
+    const isIndividual = /individual|private client/i.test(form.businessType||'');
+    const wantRegistry = !!screenName && !isIndividual;
     setScreening({
-      sanctions:{status: screenName ? 'loading' : 'skipped'},
+      sanctions:{status: screenName ? 'loading' : 'loading-deferred'},
       media:{status:'loading'},
+      registry:{status: wantRegistry ? 'loading' : 'skipped'},
+      citations:{status:'loading'},
     });
     if (screenName) runSanctions([screenName]);
+    if (wantRegistry) runRegistry(screenName);
     runAdverseMedia(key, mode==='form'
       ? `${form.clientName} — ${[form.businessType,form.industry,form.subIndustry,form.geography].filter(Boolean).join(', ')}`
       : freeText.slice(0,600));
@@ -916,6 +1039,15 @@ function App() {
       const meta = { analyst, framework, date: new Date().toISOString(), model:'claude-sonnet-4-5' };
       setResult(parsed);
       setAuditMeta(meta);
+      // Post-brief enrichment: screen related parties the model extracted, and
+      // verify every CFR citation against the official eCFR.
+      const parties = (parsed.relatedParties||[]).map(p=>String(p||'').trim()).filter(Boolean).slice(0,4);
+      const allNames = [...new Set([screenName, ...parties].filter(Boolean))];
+      if (allNames.length > (screenName?1:0)) runSanctions(allNames);
+      else if (!screenName) setScreening(p=>({...p, sanctions:{status:'skipped'}}));
+      const cites = [...new Set((parsed.kycFlags||[]).map(f=>(f.citation||'').trim()).filter(Boolean))];
+      if (cites.length) runCitations(cites);
+      else setScreening(p=>({...p, citations:{status:'done', map:{}}}));
       // Save to history
       const entry = {
         id: Date.now().toString(),
@@ -1001,7 +1133,7 @@ function App() {
   // ── Copy / Share ─────────────────────────────────────────────────────────────
   const copyReport = () => doFlash('Report copied!', ()=>{
     if (!result) return;
-    navigator.clipboard.writeText(`CLIENT INTELLIGENCE BRIEF — ${form.clientName||'Client'}\n${'─'.repeat(50)}\nRisk Score: ${result.riskScore}/100 (${result.riskTier} Risk)\nFramework: ${FRAMEWORKS[framework]?.short}\nAnalyst: ${analyst||'—'}\n\nSNAPSHOT\n${result.clientSnapshot}\n\nRISK EXPLANATION\n${result.riskExplanation}\n\nLIVE SCREENING\n${screening?.sanctions?.status==='done'?screening.sanctions.data.results.flatMap(r=>r.lists.map(l=>`• ${l.label}: ${l.error?'source unavailable':l.matches.length?l.matches.length+' POTENTIAL MATCH(ES) — '+l.matches.map(m=>`${m.name} (${m.score}%)`).join('; '):'no match'} [${l.entries.toLocaleString()} entries]`)).join('\n'):'• Sanctions: not screened'}\n${screening?.media?.status==='done'?`• Adverse media: ${screening.media.data?.findings?.length?screening.media.data.findings.length+' finding(s) — '+screening.media.data.findings.map(f=>f.headline).join('; '):'none found'}`:'• Adverse media: not screened'}\n\nRED FLAGS\n${result.redFlags?.length?result.redFlags.map(f=>`• ${f}`).join('\n'):'None.'}\n\nKYC FLAGS\n${result.kycFlags?.map(f=>`• [${f.priority}] ${f.flag}${f.citation?' ('+f.citation+')':''} — ${f.action}`).join('\n')}\n\nKEY QUESTIONS\n${result.keyQuestions?.map((q,i)=>`${i+1}. ${q}`).join('\n')}\n\nRM BRIEF\n${result.relationshipManagerBrief}\n\nDISCLAIMER: AI-generated. Not a regulatory determination. Requires human compliance review.\n─ Generated by ClientIQ`);
+    navigator.clipboard.writeText(`CLIENT INTELLIGENCE BRIEF — ${form.clientName||'Client'}\n${'─'.repeat(50)}\nRisk Score: ${result.riskScore}/100 (${result.riskTier} Risk)\nFramework: ${FRAMEWORKS[framework]?.short}\nAnalyst: ${analyst||'—'}\n\nSNAPSHOT\n${result.clientSnapshot}\n\nRISK EXPLANATION\n${result.riskExplanation}\n\nLIVE SCREENING\n${screening?.sanctions?.status==='done'?screening.sanctions.data.results.flatMap(r=>r.lists.map(l=>`• ${l.label}: ${l.error?'source unavailable':l.matches.length?l.matches.length+' POTENTIAL MATCH(ES) — '+l.matches.map(m=>`${m.name} (${m.score}%)`).join('; '):'no match'} [${l.entries.toLocaleString()} entries]`)).join('\n'):'• Sanctions: not screened'}\n${screening?.media?.status==='done'?`• Adverse media: ${screening.media.data?.findings?.length?screening.media.data.findings.length+' finding(s) — '+screening.media.data.findings.map(f=>f.headline).join('; '):'none found'}`:'• Adverse media: not screened'}\n${screening?.registry?.status==='done'?screening.registry.data.sources.map(s=>`• ${s.label}: ${s.status==='unconfigured'?'not configured':s.status==='error'?'unavailable':s.matches.length?s.matches.length+' registration(s) — '+s.matches.map(m=>m.name).join('; '):'no registration found'}`).join('\n'):'• Corporate registry: not checked'}\n${screening?.citations?.status==='done'&&screening.citations.map?`• Citations vs eCFR: ${Object.values(screening.citations.map).filter(r=>r.status==='verified').length} verified, ${Object.values(screening.citations.map).filter(r=>r.status==='not_found').length} not found, ${Object.values(screening.citations.map).filter(r=>r.status==='unsupported'||r.status==='error').length} need manual check`:'• Citations: not verified'}\n\nRED FLAGS\n${result.redFlags?.length?result.redFlags.map(f=>`• ${f}`).join('\n'):'None.'}\n\nKYC FLAGS\n${result.kycFlags?.map(f=>`• [${f.priority}] ${f.flag}${f.citation?' ('+f.citation+')':''} — ${f.action}`).join('\n')}\n\nKEY QUESTIONS\n${result.keyQuestions?.map((q,i)=>`${i+1}. ${q}`).join('\n')}\n\nRM BRIEF\n${result.relationshipManagerBrief}\n\nDISCLAIMER: AI-generated. Not a regulatory determination. Requires human compliance review.\n─ Generated by ClientIQ`);
   });
 
   const shareSlack = () => doFlash('Copied for Slack!', ()=>{
@@ -1310,10 +1442,11 @@ function App() {
                     <path d="M6 1L11 10H1L6 1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
                     <path d="M6 5v2.5M6 9v.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                   </svg>
-                  <p className="text-[11px] text-amber-800 leading-snug">AI-generated flags. Live name screening against OFAC SDN, OFAC Consolidated, and UK OFSI lists appears in the Live Screening panel above; UN/EU coverage is on the roadmap. Regulatory citations are indicative only and require verification.</p>
+                  <p className="text-[11px] text-amber-800 leading-snug">AI-generated flags. Live name screening against OFAC SDN, OFAC Consolidated, UK OFSI, and UN lists appears in the Live Screening panel above; EU list coverage is on the roadmap. CFR citations are auto-checked against the official eCFR — ✓ verified links, ✗ not found; others require manual verification.</p>
                 </div>
                 {result.kycFlags?.map((f,i)=>(
-                  <KYCFlag key={i} {...f} last={i===result.kycFlags.length-1}/>
+                  <KYCFlag key={i} {...f} last={i===result.kycFlags.length-1}
+                    citeInfo={screening?.citations?.map?.[(f.citation||'').trim()]}/>
                 ))}
               </Card>
             </div>
@@ -1381,7 +1514,7 @@ function App() {
             {/* Print-only disclaimer footer */}
             <div className="print-only mt-8 pt-4" style={{borderTop:'1px solid #E4E4E7'}}>
               <p className="text-[9px] text-zinc-500 leading-snug">
-                DISCLAIMER: This Client Intelligence Brief is generated by artificial intelligence (Anthropic claude-sonnet-4-5) and is provided for informational purposes only. It does not constitute a regulatory determination, legal advice, or a substitute for human compliance review. Sanctions screening uses fuzzy name matching against officially published OFAC SDN, OFAC Consolidated, and UK OFSI lists at generation time; potential matches are leads for analyst review, and coverage of UN/EU lists must be verified separately. All findings must be reviewed and approved by a qualified compliance officer prior to any onboarding decision. Regulatory citations are indicative only and may not reflect the most current guidance. ClientIQ | Confidential
+                DISCLAIMER: This Client Intelligence Brief is generated by artificial intelligence (Anthropic claude-sonnet-4-5) and is provided for informational purposes only. It does not constitute a regulatory determination, legal advice, or a substitute for human compliance review. Sanctions screening uses fuzzy name matching against officially published OFAC SDN, OFAC Consolidated, UK OFSI, and UN Security Council lists at generation time; potential matches are leads for analyst review, and EU list coverage must be verified separately. Corporate registry checks cover SEC EDGAR and UK Companies House only; absence of a registration is not proof of nonexistence. All findings must be reviewed and approved by a qualified compliance officer prior to any onboarding decision. Regulatory citations are indicative only and may not reflect the most current guidance. ClientIQ | Confidential
               </p>
             </div>
           </div>

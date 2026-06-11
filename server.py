@@ -45,19 +45,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/api/messages':
             self._proxy()
-        elif self.path == '/api/screen':
+        elif self.path in ('/api/screen', '/api/registry', '/api/citations'):
             self._proxy_screen()
         else:
             self.send_error(404, 'Not found')
 
-    # ── /api/screen → deployed Vercel function (no key needed; the sanctions
-    #    list logic lives in api/screen.js and isn't duplicated here) ──────────
+    # ── data endpoints → deployed Vercel functions (no key needed; the list /
+    #    registry / eCFR logic lives in api/*.js and isn't duplicated here) ────
     def _proxy_screen(self):
         try:
             length = int(self.headers.get('Content-Length', 0))
             body   = self.rfile.read(length)
             req = urllib.request.Request(
-                'https://tryclientiq.vercel.app/api/screen',
+                f'https://tryclientiq.vercel.app{self.path}',
                 data=body,
                 headers={'content-type': 'application/json'},
                 method='POST',

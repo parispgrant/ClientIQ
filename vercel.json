@@ -5,6 +5,12 @@
     },
     "api/screen.js": {
       "maxDuration": 60
+    },
+    "api/registry.js": {
+      "maxDuration": 30
+    },
+    "api/citations.js": {
+      "maxDuration": 30
     }
   }
 }
