@@ -664,6 +664,126 @@ function ErrorView({ msg, onRetry }) {
   );
 }
 
+// ─── Live screening panel ──────────────────────────────────────────────────────
+const SEV_COLOR = { High: C.red, Medium: C.amber, Low: C.green };
+
+function ScreenRow({ icon, label, sub, right, children }) {
+  return (
+    <div className="py-2.5 border-b border-zinc-900/[0.05] last:border-0">
+      <div className="flex items-center gap-2.5">
+        <span className="text-[13px] flex-shrink-0 w-5 text-center">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <span className="text-[13px] font-medium text-zinc-800 tracking-tight">{label}</span>
+          {sub && <span className="text-[11px] text-zinc-400 ml-2">{sub}</span>}
+        </div>
+        {right && <span className="text-[11px] font-medium flex-shrink-0">{right}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Spinner() {
+  return <span className="inline-block w-3 h-3 rounded-full border-2 border-zinc-200 border-t-blue-500 animate-spin align-middle"/>;
+}
+
+function ScreeningCard({ screening }) {
+  if (!screening) return null;
+  const { sanctions, media } = screening;
+  const sancResults = sanctions?.data?.results || [];
+  const anyHit = sancResults.some(r => r.lists.some(l => l.matches.length));
+  const mediaFindings = media?.data?.findings || [];
+  return (
+    <div className="mb-3">
+      <Card title="Live Screening" icon="◍" accent={anyHit || mediaFindings.length ? C.red : C.green} delay={120}>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide bg-blue-500/10 text-blue-600 border border-blue-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"/> LIVE DATA
+          </span>
+          <span className="text-[11px] text-zinc-400">
+            {sanctions?.status==='done' && sanctions.data?.totalEntries
+              ? `${sanctions.data.totalEntries.toLocaleString()} list entries checked · `
+              : ''}potential matches require human review
+          </span>
+        </div>
+
+        {/* Sanctions lists */}
+        {sanctions?.status==='skipped' && (
+          <ScreenRow icon="◌" label="Sanctions screening" right={<span className="text-zinc-400">Skipped</span>}
+            sub="needs a client name — use Structured Form"/>
+        )}
+        {sanctions?.status==='loading' && (
+          <ScreenRow icon={<Spinner/>} label="Sanctions screening" sub="checking OFAC + UK lists…"/>
+        )}
+        {sanctions?.status==='error' && (
+          <ScreenRow icon="⚠" label="Sanctions screening" right={<span style={{color:C.amber}}>Unavailable</span>} sub={sanctions.error}/>
+        )}
+        {sanctions?.status==='done' && sancResults.map(r => r.lists.map(l => (
+          <ScreenRow key={l.id}
+            icon={l.error ? '⚠' : l.matches.length ? '⚠' : '✓'}
+            label={l.label} sub={`${l.authority} · ${l.entries.toLocaleString()} entries`}
+            right={l.error
+              ? <span style={{color:C.amber}}>Source unavailable</span>
+              : l.matches.length
+                ? <span style={{color:C.red}}>{l.matches.length} potential match{l.matches.length>1?'es':''}</span>
+                : <span style={{color:C.green}}>No match</span>}>
+            {l.matches.length>0 && (
+              <div className="mt-2 ml-7 flex flex-col gap-1.5">
+                {l.matches.map((m,i)=>(
+                  <div key={i} className="px-3 py-2 rounded-lg text-[12px] leading-snug"
+                    style={{background:'rgba(244,63,94,0.05)',border:'1px solid rgba(244,63,94,0.15)'}}>
+                    <span className="font-semibold text-zinc-900">{m.name}</span>
+                    <span className="text-zinc-500"> · {m.type}{m.program?` · ${m.program}`:''} · </span>
+                    <span className="font-mono font-semibold" style={{color:C.red}}>{m.score}% similar</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScreenRow>
+        )))}
+
+        {/* Adverse media */}
+        {media?.status==='loading' && (
+          <ScreenRow icon={<Spinner/>} label="Adverse media" sub="searching the web…"/>
+        )}
+        {media?.status==='error' && (
+          <ScreenRow icon="⚠" label="Adverse media" right={<span style={{color:C.amber}}>Unavailable</span>} sub={media.error}/>
+        )}
+        {media?.status==='done' && (
+          <ScreenRow icon={mediaFindings.length ? '⚠' : '✓'} label="Adverse media" sub="live web search"
+            right={mediaFindings.length
+              ? <span style={{color:C.red}}>{mediaFindings.length} finding{mediaFindings.length>1?'s':''}</span>
+              : <span style={{color:C.green}}>None found</span>}>
+            {media.data?.summary && <p className="mt-1.5 ml-7 text-[12px] text-zinc-500 leading-snug m-0">{media.data.summary}</p>}
+            {mediaFindings.length>0 && (
+              <div className="mt-2 ml-7 flex flex-col gap-1.5">
+                {mediaFindings.map((f,i)=>(
+                  <div key={i} className="px-3 py-2 rounded-lg text-[12px] leading-snug"
+                    style={{background:'rgba(244,63,94,0.04)',border:'1px solid rgba(244,63,94,0.12)'}}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{color:'#fff',background:SEV_COLOR[f.severity]||C.amber}}>{f.severity||'—'}</span>
+                      {f.url
+                        ? <a href={f.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline truncate">{f.headline}</a>
+                        : <span className="font-semibold text-zinc-900">{f.headline}</span>}
+                    </div>
+                    <p className="m-0 mt-1 text-zinc-500">{f.source}{f.summary?` — ${f.summary}`:''}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScreenRow>
+        )}
+
+        {sanctions?.data?.checkedAt && (
+          <p className="m-0 mt-2.5 text-[10px] text-zinc-400">
+            Checked {new Date(sanctions.data.checkedAt).toLocaleString()} against official published lists. Fuzzy name matching (≥{sanctions.data.threshold||80}% similarity) — a potential match is a starting point for analyst review, not a determination.
+          </p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [apiKey,   setApiKey]   = useState('');
@@ -681,6 +801,7 @@ function App() {
   const [histOpen, setHistOpen] = useState(false);
   const [regenLoading, setRegenLoading] = useState({});
   const [auditMeta, setAuditMeta] = useState(null);
+  const [screening, setScreening] = useState(null);
   const intervalRef = useRef(null);
 
   useEffect(()=>{ localStorage.setItem(ANALYST_KEY, analyst); },[analyst]);
@@ -689,13 +810,53 @@ function App() {
   // ── Handlers (logic unchanged) ──────────────────────────────────────────────
   const upd = (k,v) => setForm(p=>({...p,[k]:v}));
   const toggleNeed = n => setForm(p=>({...p, bankingNeeds:p.bankingNeeds.includes(n)?p.bankingNeeds.filter(x=>x!==n):[...p.bankingNeeds,n]}));
-  const loadSample = key => { setForm(SAMPLES[key]); setMode('form'); setResult(null); setErr(null); setAuditMeta(null); window.scrollTo({top:0,behavior:'smooth'}); };
+  const loadSample = key => { setForm(SAMPLES[key]); setMode('form'); setResult(null); setErr(null); setAuditMeta(null); setScreening(null); window.scrollTo({top:0,behavior:'smooth'}); };
 
   const buildPrompt = () => mode==='freetext'
     ? `Client profile raw notes:\n\n${freeText}\n\nExtract all relevant information and analyze.`
     : `Client Profile:\nName: ${form.clientName}\nBusiness Type: ${form.businessType}\nIndustry: ${form.industry}\nSub-Industry: ${form.subIndustry}\nAnnual Revenue: ${form.revenueRange}\nEmployees: ${form.employees}\nGeography: ${form.geography}\nBanking Needs: ${form.bankingNeeds.join(', ')}\nKnown Risk Factors: ${form.riskFactors}\nSource of Funds: ${form.sourceOfFunds}\nExisting Banking: ${form.existingBanking}\nRM Notes: ${form.rmNotes}`;
 
   const doFlash = (msg,fn) => { fn(); setFlash(msg); setTimeout(()=>setFlash(''),2200); };
+
+  // ── Live screening (runs in parallel with the brief; failures never block it) ─
+  const runSanctions = async (names) => {
+    try {
+      const res = await fetch('/api/screen',{
+        method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({names})
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data?.error?.message||`Screening error ${res.status}`);
+      setScreening(p=>({...p, sanctions:{status:'done', data}}));
+    } catch(e) {
+      console.error('[ClientIQ] sanctions screen error:',e);
+      setScreening(p=>({...p, sanctions:{status:'error', error:e.message}}));
+    }
+  };
+
+  const runAdverseMedia = async (key, subject) => {
+    try {
+      const res = await fetch('/api/messages',{
+        method:'POST',
+        headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-5',
+          max_tokens:1200,
+          stream:true,
+          tools:[{type:'web_search_20250305',name:'web_search',max_uses:3}],
+          system:'You are an adverse media screening assistant for financial-services client onboarding. Use web search to look for genuinely adverse news about the client: fraud, sanctions, regulatory enforcement, AML/BSA actions, litigation, criminal allegations. Ignore routine business news. Return ONLY a raw JSON object, no markdown fences, no prose: {"status":"clear|findings","summary":"1 short sentence","findings":[max 4: {"headline":"...","source":"publication","url":"...","summary":"15 words max","severity":"High|Medium|Low"}]}. If nothing adverse is found, return status "clear" with an empty findings array.',
+          messages:[{role:'user',content:`Run adverse media screening for this prospective client:\n\n${subject}`}]
+        })
+      });
+      if (!res.ok) { const b = await res.json().catch(()=>({})); throw new Error(b?.error?.message||`API error ${res.status}`); }
+      const text = await streamAnthropic(res);
+      const data = parseModelJson(text);
+      setScreening(p=>({...p, media:{status:'done', data}}));
+    } catch(e) {
+      console.error('[ClientIQ] adverse media error:',e);
+      setScreening(p=>({...p, media:{status:'error', error:e.message}}));
+    }
+  };
 
   const analyze = async () => {
     const key = apiKey.trim();
@@ -706,6 +867,17 @@ function App() {
     if (mode==='freetext' && !freeText.trim()) { setErr('Paste some client notes to analyze.'); return; }
     setLoading(true); setResult(null); setErr(null); setStep(0); setAuditMeta(null);
     intervalRef.current = setInterval(()=>setStep(s=>Math.min(s+1,LOADING_STEPS.length-1)),950);
+    // Fire live screening in parallel — each manages its own state and can
+    // fail independently without blocking the brief.
+    const screenName = mode==='form' ? form.clientName.trim() : '';
+    setScreening({
+      sanctions:{status: screenName ? 'loading' : 'skipped'},
+      media:{status:'loading'},
+    });
+    if (screenName) runSanctions([screenName]);
+    runAdverseMedia(key, mode==='form'
+      ? `${form.clientName} — ${[form.businessType,form.industry,form.subIndustry,form.geography].filter(Boolean).join(', ')}`
+      : freeText.slice(0,600));
     try {
       let res;
       try {
@@ -811,6 +983,7 @@ function App() {
     setFreeText(h.freeText||'');
     setMode(h.mode||'form');
     setResult(h.result);
+    setScreening(null); // screening is live-only; a restored brief wasn't re-screened
     setAuditMeta({analyst:h.analyst,framework:h.framework,date:h.date,model:'claude-sonnet-4-5'});
     setErr(null);
     setHistOpen(false);
@@ -828,7 +1001,7 @@ function App() {
   // ── Copy / Share ─────────────────────────────────────────────────────────────
   const copyReport = () => doFlash('Report copied!', ()=>{
     if (!result) return;
-    navigator.clipboard.writeText(`CLIENT INTELLIGENCE BRIEF — ${form.clientName||'Client'}\n${'─'.repeat(50)}\nRisk Score: ${result.riskScore}/100 (${result.riskTier} Risk)\nFramework: ${FRAMEWORKS[framework]?.short}\nAnalyst: ${analyst||'—'}\n\nSNAPSHOT\n${result.clientSnapshot}\n\nRISK EXPLANATION\n${result.riskExplanation}\n\nRED FLAGS\n${result.redFlags?.length?result.redFlags.map(f=>`• ${f}`).join('\n'):'None.'}\n\nKYC FLAGS\n${result.kycFlags?.map(f=>`• [${f.priority}] ${f.flag}${f.citation?' ('+f.citation+')':''} — ${f.action}`).join('\n')}\n\nKEY QUESTIONS\n${result.keyQuestions?.map((q,i)=>`${i+1}. ${q}`).join('\n')}\n\nRM BRIEF\n${result.relationshipManagerBrief}\n\nDISCLAIMER: AI-generated. Not a regulatory determination. Requires human compliance review.\n─ Generated by ClientIQ`);
+    navigator.clipboard.writeText(`CLIENT INTELLIGENCE BRIEF — ${form.clientName||'Client'}\n${'─'.repeat(50)}\nRisk Score: ${result.riskScore}/100 (${result.riskTier} Risk)\nFramework: ${FRAMEWORKS[framework]?.short}\nAnalyst: ${analyst||'—'}\n\nSNAPSHOT\n${result.clientSnapshot}\n\nRISK EXPLANATION\n${result.riskExplanation}\n\nLIVE SCREENING\n${screening?.sanctions?.status==='done'?screening.sanctions.data.results.flatMap(r=>r.lists.map(l=>`• ${l.label}: ${l.error?'source unavailable':l.matches.length?l.matches.length+' POTENTIAL MATCH(ES) — '+l.matches.map(m=>`${m.name} (${m.score}%)`).join('; '):'no match'} [${l.entries.toLocaleString()} entries]`)).join('\n'):'• Sanctions: not screened'}\n${screening?.media?.status==='done'?`• Adverse media: ${screening.media.data?.findings?.length?screening.media.data.findings.length+' finding(s) — '+screening.media.data.findings.map(f=>f.headline).join('; '):'none found'}`:'• Adverse media: not screened'}\n\nRED FLAGS\n${result.redFlags?.length?result.redFlags.map(f=>`• ${f}`).join('\n'):'None.'}\n\nKYC FLAGS\n${result.kycFlags?.map(f=>`• [${f.priority}] ${f.flag}${f.citation?' ('+f.citation+')':''} — ${f.action}`).join('\n')}\n\nKEY QUESTIONS\n${result.keyQuestions?.map((q,i)=>`${i+1}. ${q}`).join('\n')}\n\nRM BRIEF\n${result.relationshipManagerBrief}\n\nDISCLAIMER: AI-generated. Not a regulatory determination. Requires human compliance review.\n─ Generated by ClientIQ`);
   });
 
   const shareSlack = () => doFlash('Copied for Slack!', ()=>{
@@ -1106,6 +1279,9 @@ function App() {
               </div>
             </div>
 
+            {/* Live screening: sanctions lists + adverse media */}
+            <ScreeningCard screening={screening}/>
+
             {/* Red Flags */}
             {result.redFlags?.length>0 && (
               <div className="mb-3">
@@ -1134,7 +1310,7 @@ function App() {
                     <path d="M6 1L11 10H1L6 1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
                     <path d="M6 5v2.5M6 9v.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                   </svg>
-                  <p className="text-[11px] text-amber-800 leading-snug">AI-generated flags require verification against real-time OFAC SDN, UN, and EU sanctions lists before onboarding decisions. Regulatory citations are indicative only.</p>
+                  <p className="text-[11px] text-amber-800 leading-snug">AI-generated flags. Live name screening against OFAC SDN, OFAC Consolidated, and UK OFSI lists appears in the Live Screening panel above; UN/EU coverage is on the roadmap. Regulatory citations are indicative only and require verification.</p>
                 </div>
                 {result.kycFlags?.map((f,i)=>(
                   <KYCFlag key={i} {...f} last={i===result.kycFlags.length-1}/>
@@ -1205,7 +1381,7 @@ function App() {
             {/* Print-only disclaimer footer */}
             <div className="print-only mt-8 pt-4" style={{borderTop:'1px solid #E4E4E7'}}>
               <p className="text-[9px] text-zinc-500 leading-snug">
-                DISCLAIMER: This Client Intelligence Brief is generated by artificial intelligence (Anthropic claude-sonnet-4-5) and is provided for informational purposes only. It does not constitute a regulatory determination, legal advice, or a substitute for human compliance review. Sanctions screening information is AI-derived and must be verified against real-time databases (OFAC SDN, UN Consolidated, EU Financial Sanctions). All findings must be reviewed and approved by a qualified compliance officer prior to any onboarding decision. Regulatory citations are indicative only and may not reflect the most current guidance. ClientIQ | Confidential
+                DISCLAIMER: This Client Intelligence Brief is generated by artificial intelligence (Anthropic claude-sonnet-4-5) and is provided for informational purposes only. It does not constitute a regulatory determination, legal advice, or a substitute for human compliance review. Sanctions screening uses fuzzy name matching against officially published OFAC SDN, OFAC Consolidated, and UK OFSI lists at generation time; potential matches are leads for analyst review, and coverage of UN/EU lists must be verified separately. All findings must be reviewed and approved by a qualified compliance officer prior to any onboarding decision. Regulatory citations are indicative only and may not reflect the most current guidance. ClientIQ | Confidential
               </p>
             </div>
           </div>
